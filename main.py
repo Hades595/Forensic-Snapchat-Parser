@@ -287,7 +287,8 @@ class SnapchatParserGUI(QWidget):
             process_android(
                 case_name=case_name,
                 input_path=self.extract_path.text(),
-                output_path=base_output
+                output_path=base_output,
+                download_files=self.download_snaps.isChecked()
             )
 
         self.log("Processing complete\n", "OK")
