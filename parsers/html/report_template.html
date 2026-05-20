@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Snapchat Forensic Report</title>
+    <style>
+        body { font-family: Arial; background: #f4f4f4; }
+        .snap { background: white; padding: 10px; margin: 10px; border-radius: 8px; }
+        img, video { max-width: 300px; display: block; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<h1>Snapchat Forensic Report</h1>
+
+{% for snap in snaps %}
+<div class="snap">
+    <p><strong>Snap ID:</strong> {{ snap.snap_id }}</p>
+    <p><strong>Media ID:</strong> {{ snap.media_id }}</p>
+    <p><strong>Format:</strong> {{ snap.format }}</p>
+
+    {% if snap.file_path.endswith('.jpg') %}
+        <img src="{{ snap.file_path }}">
+    {% elif snap.file_path.endswith('.mp4') %}
+        <video controls src="{{ snap.file_path }}"></video>
+    {% endif %}
+</div>
+{% endfor %}
+
+</body>
+</html>
