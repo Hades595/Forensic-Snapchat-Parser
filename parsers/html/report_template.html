@@ -1,30 +1,543 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Snapchat Forensic Report</title>
-    <style>
-        body { font-family: Arial; background: #f4f4f4; }
-        .snap { background: white; padding: 10px; margin: 10px; border-radius: 8px; }
-        img, video { max-width: 300px; display: block; margin-top: 10px; }
-    </style>
+<meta charset="UTF-8">
+<title>Forensic Report — {{ case_name }}</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<style>
+  /* ── Reset ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    color: #111;
+    background: #f0f2f5;
+  }
+
+  /* ── Cover page ── */
+  .cover {
+    background: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 60px 64px;
+    border-bottom: 4px solid #1a1a2e;
+  }
+  .cover-badge {
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #6b7280;
+    margin-bottom: 20px;
+  }
+  .cover-title {
+    font-size: 38px;
+    font-weight: 700;
+    color: #1a1a2e;
+    line-height: 1.15;
+    margin-bottom: 6px;
+  }
+  .cover-platform {
+    font-size: 18px;
+    color: #2563eb;
+    font-weight: 600;
+    margin-bottom: 44px;
+  }
+  .cover-meta {
+    border-top: 1px solid #e5e7eb;
+    padding-top: 28px;
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 12px 0;
+    max-width: 560px;
+  }
+  .cover-meta dt { color: #6b7280; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .cover-meta dd { color: #111; }
+  .cover-coc {
+    margin-top: 44px;
+    padding: 18px 20px;
+    border: 1px solid #d1d5db;
+    background: #f9fafb;
+    font-size: 11px;
+    color: #4b5563;
+    line-height: 1.7;
+    max-width: 680px;
+  }
+  .cover-coc strong { display: block; margin-bottom: 6px; font-size: 12px; color: #111; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ── Tab navigation bar ── */
+  .tab-bar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: #1a1a2e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    height: 52px;
+    gap: 16px;
+  }
+  .tab-bar .report-meta {
+    font-size: 11px;
+    color: #9ca3af;
+    white-space: nowrap;
+  }
+  .tab-buttons { display: flex; gap: 4px; }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    color: #9ca3af;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .tab-btn:hover { background: rgba(255,255,255,0.08); color: #e5e7eb; }
+  .tab-btn.active { background: #2563eb; color: #fff; }
+
+  /* ── Tab panes ── */
+  .tab-pane { display: none; padding: 32px; max-width: 1000px; margin: 0 auto; }
+  .tab-pane.active { display: block; }
+
+  /* ── Summary table ── */
+  .section-heading {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #1a1a2e;
+  }
+  .summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-bottom: 40px;
+    font-size: 12px;
+  }
+  .summary-table thead { background: #1a1a2e; color: #fff; }
+  .summary-table thead th {
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    white-space: nowrap;
+  }
+  .summary-table tbody tr { border-bottom: 1px solid #e5e7eb; }
+  .summary-table tbody tr:last-child { border-bottom: none; }
+  .summary-table tbody tr:hover { background: #f0f9ff; }
+  .summary-table td {
+    padding: 9px 12px;
+    vertical-align: middle;
+    color: #111;
+  }
+  .summary-table td.num { color: #6b7280; font-size: 11px; text-align: center; }
+  .summary-table td a { color: #2563eb; text-decoration: none; font-family: "Courier New", monospace; font-size: 11px; }
+  .summary-table td a:hover { text-decoration: underline; }
+  .summary-table td.mono { font-family: "Courier New", monospace; font-size: 11px; }
+
+  /* ── Evidence heading ── */
+  .evidence-heading {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin: 40px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #1a1a2e;
+  }
+
+  /* ── Snap card ── */
+  .snap {
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    margin-bottom: 24px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .snap-header {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .snap-header .snap-num { font-size: 11px; color: #6b7280; margin-right: 8px; }
+  .snap-header .snap-id {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    word-break: break-all;
+  }
+  .snap-header .snap-time { font-size: 11px; color: #9ca3af; white-space: nowrap; }
+  .snap-body { padding: 14px 16px; }
+
+  /* ── Data grid ── */
+  .data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .field label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #6b7280;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .field span { display: block; font-size: 13px; color: #111; word-break: break-word; }
+  .field span.mono { font-family: "Courier New", Courier, monospace; font-size: 11px; color: #1a1a2e; }
+  .field a { color: #2563eb; text-decoration: none; font-size: 11px; word-break: break-all; }
+
+  /* ── Crypto block ── */
+  .crypto-block {
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+  }
+  .crypto-row {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 6px;
+    align-items: start;
+    margin-bottom: 6px;
+  }
+  .crypto-row:last-child { margin-bottom: 0; }
+  .crypto-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #6b7280;
+    padding-top: 2px;
+  }
+  .crypto-block code {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 11px;
+    color: #1a1a2e;
+    word-break: break-all;
+    background: none;
+  }
+
+  /* ── Media embed ── */
+  .snap-media {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e5e7eb;
+  }
+  .snap-media label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #6b7280;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .snap-media img { max-width: 320px; max-height: 240px; border: 1px solid #d1d5db; border-radius: 4px; display: block; }
+  .snap-media video { max-width: 320px; border: 1px solid #d1d5db; border-radius: 4px; display: block; }
+
+  /* ── Map tab ── */
+  #map { height: 600px; border-radius: 6px; border: 1px solid #d1d5db; }
+  .map-no-data { text-align: center; padding: 48px; color: #6b7280; font-style: italic; border: 1px dashed #d1d5db; border-radius: 6px; }
+
+  /* ── Empty state ── */
+  .no-data { text-align: center; padding: 48px; color: #6b7280; font-style: italic; border: 1px dashed #d1d5db; border-radius: 6px; }
+
+  /* ── Print styles ── */
+  @media print {
+    body { background: #fff; }
+    .cover { min-height: auto; page-break-after: always; border-bottom: 4px solid #000; padding: 40px 48px; }
+    .tab-bar { display: none !important; }
+    #tab-map { display: none !important; }
+    #tab-evidence { display: block !important; padding: 0; }
+    .tab-pane { padding: 0; max-width: none; }
+    .snap { page-break-inside: avoid; break-inside: avoid; box-shadow: none; border: 1px solid #999; margin-bottom: 16px; }
+    .snap-header { background: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .summary-table { box-shadow: none; }
+    .summary-table thead { background: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    a { color: #000; text-decoration: none; }
+    .snap-media img, .snap-media video { max-width: 200px; }
+    .evidence-heading { page-break-before: avoid; }
+  }
+</style>
 </head>
 <body>
 
-<h1>Snapchat Forensic Report</h1>
+<!-- ══════════════ COVER PAGE ══════════════ -->
+<div class="cover">
+  <p class="cover-badge">Digital Forensic Evidence Report</p>
+  <h1 class="cover-title">{{ case_name }}</h1>
+  <p class="cover-platform">Snapchat {{ platform }} Extraction</p>
 
-{% for snap in snaps %}
-<div class="snap">
-    <p><strong>Snap ID:</strong> {{ snap.snap_id }}</p>
-    <p><strong>Media ID:</strong> {{ snap.media_id }}</p>
-    <p><strong>Format:</strong> {{ snap.format }}</p>
+  <dl class="cover-meta">
+    <dt>Examiner</dt>
+    <dd>{{ examiner if examiner else 'Not specified' }}</dd>
 
-    {% if snap.file_path.endswith('.jpg') %}
-        <img src="{{ snap.file_path }}">
-    {% elif snap.file_path.endswith('.mp4') %}
-        <video controls src="{{ snap.file_path }}"></video>
-    {% endif %}
+    <dt>Platform</dt>
+    <dd>{{ platform }}</dd>
+
+    <dt>Total Snaps</dt>
+    <dd>{{ snap_count }}</dd>
+
+    <dt>Generated</dt>
+    <dd>{{ generated_at }}</dd>
+
+    <dt>Tool</dt>
+    <dd>Forensic Snapchat Parser</dd>
+  </dl>
+
+  <div class="cover-coc">
+    <strong>Chain of Custody &amp; Integrity Statement</strong>
+    This report was generated automatically from device data extracted using a UFED forensic acquisition.
+    All database files were copied to the case output folder prior to analysis; originals were not modified.
+    Encrypted media files were decrypted in-place using keys and initialisation vectors recovered from the
+    Snapchat application database. The integrity of the source data should be verified against examiner
+    notes and UFED extraction logs. This document is intended for use in legal proceedings and must not
+    be altered after generation.
+  </div>
 </div>
-{% endfor %}
+
+<!-- ══════════════ TAB BAR ══════════════ -->
+<div class="tab-bar">
+  <span class="report-meta">Generated: {{ generated_at }} &nbsp;|&nbsp; {{ snap_count }} snap{{ 's' if snap_count != 1 else '' }}</span>
+  <div class="tab-buttons">
+    <button class="tab-btn active" onclick="showTab('evidence', this)">Evidence Records</button>
+    <button class="tab-btn" onclick="showTab('map', this)">Map View</button>
+  </div>
+</div>
+
+<!-- ══════════════ EVIDENCE TAB ══════════════ -->
+<div id="tab-evidence" class="tab-pane active">
+
+  <!-- Summary table -->
+  <h2 class="section-heading">Summary — {{ snap_count }} Snap{{ 's' if snap_count != 1 else '' }}</h2>
+
+  {% if snaps %}
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Snap ID</th>
+        <th>Capture Time</th>
+        <th>Format</th>
+        <th>Region</th>
+        <th>Coordinates</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for snap in snaps %}
+      <tr>
+        <td class="num">{{ loop.index }}</td>
+        <td><a href="#snap-{{ loop.index }}">{{ snap.snap_id[:24] }}{% if snap.snap_id|length > 24 %}…{% endif %}</a></td>
+        <td>{{ snap.capture_time or '—' }}</td>
+        <td>{{ snap.media_format | replace('_', ' ') | title if snap.media_format else '—' }}</td>
+        <td>{{ snap.region or '—' }}</td>
+        <td class="mono">
+          {% if snap.latitude is not none and snap.longitude is not none %}
+            {{ "%.5f"|format(snap.latitude) }}, {{ "%.5f"|format(snap.longitude) }}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Detailed evidence cards -->
+  <h2 class="evidence-heading">Detailed Evidence Records</h2>
+
+  {% for snap in snaps %}
+  <div class="snap" id="snap-{{ loop.index }}">
+
+    <div class="snap-header">
+      <span>
+        <span class="snap-num">#{{ loop.index }}</span>
+        <span class="snap-id">{{ snap.snap_id }}</span>
+      </span>
+      {% if snap.capture_time %}
+        <span class="snap-time">Captured: {{ snap.capture_time }}</span>
+      {% endif %}
+    </div>
+
+    <div class="snap-body">
+
+      <div class="data-grid">
+
+        {% if snap.media_id %}
+        <div class="field">
+          <label>Media ID</label>
+          <span class="mono">{{ snap.media_id }}</span>
+        </div>
+        {% endif %}
+
+        <div class="field">
+          <label>Format</label>
+          <span>{{ snap.media_format | replace('_', ' ') | title if snap.media_format else '—' }}</span>
+        </div>
+
+        {% if snap.duration %}
+        <div class="field">
+          <label>Duration</label>
+          <span>{{ "%.2f"|format(snap.duration) }}s</span>
+        </div>
+        {% endif %}
+
+        {% if snap.region %}
+        <div class="field">
+          <label>Region</label>
+          <span>{{ snap.region }}</span>
+        </div>
+        {% endif %}
+
+        {% if snap.latitude is not none and snap.longitude is not none %}
+        <div class="field">
+          <label>Coordinates</label>
+          <span class="mono">{{ "%.6f"|format(snap.latitude) }}, {{ "%.6f"|format(snap.longitude) }}</span>
+        </div>
+        {% endif %}
+
+        {% if snap.media_url %}
+        <div class="field">
+          <label>CDN URL</label>
+          <a href="{{ snap.media_url }}" title="{{ snap.media_url }}">{{ snap.media_url[:60] }}{% if snap.media_url|length > 60 %}…{% endif %}</a>
+        </div>
+        {% endif %}
+
+      </div>
+
+      <div class="crypto-block">
+        <div class="crypto-row">
+          <span class="crypto-label">AES-256 Key</span>
+          <code>{{ snap.key if snap.key else '—' }}</code>
+        </div>
+        <div class="crypto-row">
+          <span class="crypto-label">IV</span>
+          <code>{{ snap.iv if snap.iv else '—' }}</code>
+        </div>
+      </div>
+
+      {% if snap.file_path %}
+      <div class="snap-media">
+        <label>Decrypted Media</label>
+        {% if snap.media_format == 'image_jpeg' %}
+          <img src="{{ snap.file_path }}" alt="Snap {{ snap.snap_id }}">
+        {% elif snap.media_format in ('video_hevc', 'video_avc') %}
+          <video controls>
+            <source src="{{ snap.file_path }}">
+            Video cannot be displayed inline.
+          </video>
+        {% else %}
+          <span>File: {{ snap.file_path }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+  {% endfor %}
+
+  {% else %}
+  <div class="no-data">No snap records found for this extraction.</div>
+  {% endif %}
+
+</div>
+
+<!-- ══════════════ MAP TAB ══════════════ -->
+<div id="tab-map" class="tab-pane">
+
+  {% set has_coords = snaps | selectattr('latitude') | selectattr('longitude') | list %}
+
+  {% if has_coords %}
+  <h2 class="section-heading">Snap Locations ({{ has_coords | length }} with coordinates)</h2>
+  <div id="map"></div>
+  {% else %}
+  <div class="map-no-data">No location data available for this extraction.</div>
+  {% endif %}
+
+</div>
+
+<!-- ══════════════ SCRIPTS ══════════════ -->
+<script>
+  /* ── Tab switching ── */
+  var mapInitialised = false;
+
+  function showTab(name, btn) {
+    document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById('tab-' + name).classList.add('active');
+    if (btn) btn.classList.add('active');
+
+    if (name === 'map' && !mapInitialised) {
+      setTimeout(initMap, 50);
+    }
+  }
+
+  /* ── Leaflet map ── */
+  var snapLocations = [
+    {% for snap in snaps %}{% if snap.latitude is not none and snap.longitude is not none %}
+    {
+      lat: {{ snap.latitude }},
+      lon: {{ snap.longitude }},
+      id: {{ snap.snap_id | tojson }},
+      index: {{ loop.index }},
+      time: {{ (snap.capture_time or '') | tojson }},
+      region: {{ (snap.region or '') | tojson }},
+      format: {{ (snap.media_format or '') | tojson }}
+    },
+    {% endif %}{% endfor %}
+  ];
+
+  function initMap() {
+    if (mapInitialised || snapLocations.length === 0) return;
+    mapInitialised = true;
+
+    var map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).addTo(map);
+
+    var bounds = [];
+    snapLocations.forEach(function(s) {
+      var popup =
+        '<b>#' + s.index + ' — ' + s.id.substring(0, 20) + (s.id.length > 20 ? '…' : '') + '</b>' +
+        (s.time   ? '<br><span style="color:#6b7280;font-size:11px;">' + s.time + '</span>' : '') +
+        (s.region ? '<br>' + s.region : '') +
+        (s.format ? '<br><em>' + s.format.replace(/_/g, ' ') + '</em>' : '');
+
+      L.marker([s.lat, s.lon]).addTo(map).bindPopup(popup);
+      bounds.push([s.lat, s.lon]);
+    });
+
+    if (bounds.length === 1) {
+      map.setView(bounds[0], 14);
+    } else if (bounds.length > 1) {
+      map.fitBounds(bounds, { padding: [48, 48] });
+    } else {
+      map.setView([0, 0], 2);
+    }
+  }
+</script>
 
 </body>
 </html>

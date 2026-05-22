@@ -4,18 +4,14 @@ import sqlite3
 import csv
 import wget
 from string import Template
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from Crypto.Cipher import AES
-from parsers.html.report import generate_report
-from parsers.ios.arroyo import process_arroyo_ios
+from parsers.ios.reporting import generate_report
 
 SQLITE_FILE_HEADER = "SQLite format 3\x00"
 DEFAULT_PAGESIZE = 1024
 KEY_SIZE = 32
 SALT_SIZE = 16
-
-# Apple Core Data timestamps start at 2001-01-01 UTC, not Unix epoch
-CORE_DATA_EPOCH_OFFSET = 978307200
 
 gallery_db_query = """
 SELECT
@@ -43,58 +39,45 @@ FROM ZGALLERYSNAP WHERE ZMEDIAID = '$SNAPID'
 """
 
 
-def _convert_core_data_ts(ts):
-    if ts is None:
-        return ''
-    try:
-        dt = datetime.fromtimestamp(float(ts) + CORE_DATA_EPOCH_OFFSET, tz=timezone.utc)
-        return dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-    except Exception:
-        return str(ts)
+def process_ios(
+    case_name: str,
+    input_path: str,
+    cipherkey: str,
+    output_path: str,
+    download_files: bool,
+    examiner: str = "",
+    log_callback=None,
+) -> str:
 
-
-def process_ios(case_name: str, input_path: str, cipherkey: str, output_path: str, download_files: bool) -> str:
+    def _log(msg, lvl="INFO"):
+        if log_callback:
+            log_callback(msg, lvl)
+        else:
+            print(msg)
 
     scdb_found = None
     gallery_found = None
 
-    # -------------------------
-    # Locate Snapchat databases
-    # -------------------------
-
     for root, dirs, files in os.walk(input_path):
         for file in files:
-
             if file.startswith("scdb-") and file.endswith(".sqlite3"):
                 scdb_found = os.path.join(root, file)
-
             if file == "gallery.encrypteddb":
                 gallery_found = os.path.join(root, file)
-
         if scdb_found and gallery_found:
             break
 
-    print("SCDB Path:", scdb_found)
-    print("Gallery Path:", gallery_found)
+    _log(f"SCDB Path: {scdb_found}")
+    _log(f"Gallery Path: {gallery_found}")
 
     if not scdb_found:
         return "SCDB database not found"
-
     if not gallery_found:
         return "Gallery database not found"
 
-    # -------------------------
-    # Create Case Folder
-    # -------------------------
-
     case_folder = os.path.join(output_path, case_name)
     os.makedirs(case_folder, exist_ok=True)
-
-    print("Case folder:", case_folder)
-
-    # -------------------------
-    # Copy SCDB + WAL
-    # -------------------------
+    _log(f"Case folder: {case_folder}")
 
     scdb_dest = os.path.join(case_folder, os.path.basename(scdb_found))
     shutil.copy2(scdb_found, scdb_dest)
@@ -103,11 +86,7 @@ def process_ios(case_name: str, input_path: str, cipherkey: str, output_path: st
     scdb_wal = scdb_found + "-wal"
     if os.path.exists(scdb_wal):
         shutil.copy2(scdb_wal, os.path.join(case_folder, os.path.basename(scdb_wal)))
-        print("Copied SCDB WAL:", scdb_wal)
-
-    # -------------------------
-    # Copy Gallery DB + WAL
-    # -------------------------
+        _log(f"Copied SCDB WAL: {scdb_wal}")
 
     gallery_dest = os.path.join(case_folder, os.path.basename(gallery_found))
     shutil.copy2(gallery_found, gallery_dest)
@@ -115,62 +94,49 @@ def process_ios(case_name: str, input_path: str, cipherkey: str, output_path: st
     gallery_wal_path = None
     gallery_wal = gallery_found + "-wal"
     if os.path.exists(gallery_wal):
-        shutil.copy2(gallery_wal, os.path.join(case_folder, os.path.basename(gallery_wal)))
-        print("Copied Gallery WAL:", gallery_wal)
-        gallery_wal_path = os.path.join(case_folder, os.path.basename(gallery_wal))
+        gallery_wal_dest = os.path.join(case_folder, os.path.basename(gallery_wal))
+        shutil.copy2(gallery_wal, gallery_wal_dest)
+        _log(f"Copied Gallery WAL: {gallery_wal}")
+        gallery_wal_path = gallery_wal_dest
 
-    print("Files copied successfully.")
+    _log("Files copied successfully.")
 
-    snap_list = decrypt_gallery(
+    gallery_snaps = decrypt_gallery(
         cipherkey=cipherkey,
         gallery_path=gallery_dest,
         gallery_wal_path=gallery_wal_path,
         output_path=case_folder,
+        log_callback=_log,
     )
 
-    snap_list = parse_scdb(
+    snaps = parse_scdb(
         scdb_path=scdb_path,
         output_path=case_folder,
         download_files=download_files,
-        snap_list=snap_list,
+        gallery_snaps=gallery_snaps,
+        log_callback=_log,
     )
 
-    conversations, messages = process_arroyo_ios(
-        input_path=input_path,
-        output_path=case_folder,
-    )
-
-    report_path = generate_report(
-        case_name=case_name,
-        platform='IOS',
-        output_path=case_folder,
-        snaps=snap_list,
-        conversations=conversations,
-        messages=messages,
-    )
-    print("Report generated:", report_path)
-
-    return "iOS Snapchat databases copied successfully"
+    report_path = generate_report(case_name, snaps, case_folder, examiner)
+    _log(f"Report generated: {report_path}", "OK")
+    return report_path
 
 
 def read_file(path, type='bytes'):
     mode = {'bytes': 'rb', 'text': 'r'}
     try:
         with open(path, mode[type]) as f:
-            file = f.read()
+            return f.read()
     except Exception as e:
-        print(f"Failed to open file : {path}")
-        print(f"Error raised : {e}")
-    return file
+        print(f"Failed to open file: {path} — {e}")
 
 
 def convert_to_bytes(input):
-    if type(input) == str:
+    if isinstance(input, str):
         return bytes.fromhex(input.strip())
-    elif type(input) == bytes:
+    elif isinstance(input, bytes):
         return input
-    else:
-        raise Exception('Input type unrecognised')
+    raise Exception('Input type unrecognised')
 
 
 def decrypt_file(key, db_path, out_path):
@@ -184,7 +150,6 @@ def decrypt_file(key, db_path, out_path):
 
 
 def repair_sqlite_db(input_db, output_db):
-
     dump_file = os.path.join(os.path.dirname(output_db), "clean_dump.sql")
 
     conn = sqlite3.connect(input_db)
@@ -207,25 +172,40 @@ def repair_sqlite_db(input_db, output_db):
     conn.commit()
     conn.close()
 
-    print("Database recovered:", output_db)
 
+def decrypt_gallery(cipherkey, gallery_path, gallery_wal_path, output_path, log_callback=None) -> list:
+    def _log(msg, lvl="INFO"):
+        if log_callback:
+            log_callback(msg, lvl)
+        else:
+            print(msg)
 
-def decrypt_gallery(cipherkey, gallery_path, gallery_wal_path, output_path):
     cipherkey = convert_to_bytes(cipherkey)
 
-    decrypt_file(cipherkey, gallery_path, os.path.join(output_path, "gallery.decrypted.sqlite"))
+    decrypted_path = os.path.join(output_path, "gallery.decrypted.sqlite")
+    decrypted_wal = os.path.join(output_path, "gallery.decrypted.sqlite-wal")
+    recovered_path = os.path.join(output_path, "gallery.recovered.sqlite")
+
+    _log("Decrypting gallery database...")
+    decrypt_file(cipherkey, gallery_path, decrypted_path)
 
     if gallery_wal_path and os.path.exists(gallery_wal_path):
-        decrypt_file(cipherkey, gallery_wal_path, os.path.join(output_path, "gallery.decrypted.sqlite-wal"))
-        repair_sqlite_db(os.path.join(output_path, "gallery.decrypted.sqlite"), os.path.join(output_path, "gallery.recovered.sqlite"))
-        repair_sqlite_db(os.path.join(output_path, "gallery.decrypted.sqlite-wal"), os.path.join(output_path, "gallery.recovered.sqlite-wal"))
-    else:
-        repair_sqlite_db(os.path.join(output_path, "gallery.decrypted.sqlite"), os.path.join(output_path, "gallery.recovered.sqlite"))
+        decrypt_file(cipherkey, gallery_wal_path, decrypted_wal)
 
-    return parse_gallery(os.path.join(output_path, "gallery.recovered.sqlite"), output_path=output_path)
+    _log("Repairing gallery database...")
+    repair_sqlite_db(decrypted_path, recovered_path)
+    _log("Gallery database recovered.", "OK")
+
+    return parse_gallery(recovered_path, output_path)
 
 
-def parse_gallery(gallery_recovered_path, output_path):
+def _convert_key_to_str(key):
+    if isinstance(key, bytes):
+        return ''.join(format(byte, '02x') for byte in key)
+    return key or ""
+
+
+def parse_gallery(gallery_recovered_path, output_path) -> list:
     conn = sqlite3.connect(gallery_recovered_path)
     cur = conn.cursor()
     conn.execute("PRAGMA wal_checkpoint(FULL);")
@@ -234,50 +214,59 @@ def parse_gallery(gallery_recovered_path, output_path):
     conn.commit()
     conn.close()
 
-    def bytes_to_hex(b):
-        return ''.join(format(byte, '02x') for byte in b)
+    snaps = []
+    csv_rows = []
 
-    snap_list = []
+    for row in rows:
+        snap_id = row[0]
+        region = row[1] or ""
+        lat = row[2]
+        lon = row[3]
+        key = _convert_key_to_str(row[4])
+        iv = _convert_key_to_str(row[5])
 
-    with open(os.path.join(output_path, "database.csv"), 'w', encoding="utf-8") as f:
+        snaps.append({
+            "snap_id": snap_id,
+            "media_id": None,
+            "capture_time": None,
+            "duration": None,
+            "media_format": None,
+            "region": region or None,
+            "latitude": lat,
+            "longitude": lon,
+            "key": key,
+            "iv": iv,
+            "media_url": None,
+            "file_path": None,
+        })
+
+        csv_rows.append((
+            snap_id,
+            f'"{region}"' if region else "",
+            str(lat) if lat is not None else "",
+            str(lon) if lon is not None else "",
+            key,
+            iv,
+        ))
+
+    csv_path = os.path.join(output_path, "database.csv")
+    with open(csv_path, 'w', encoding="utf-8") as f:
         f.write("SNAP_ID,Region,Latitude,Longitude,Key,IV\n")
-        for row in rows:
-            snap_id = row[0]
-            region = row[1] or ''
-            lat = row[2]
-            lon = row[3]
-            key = bytes_to_hex(row[4]) if row[4] else ''
-            iv = bytes_to_hex(row[5]) if row[5] else ''
-
-            region_csv = '"' + region + '"' if region else ''
-            lat_csv = str(lat) if lat is not None else ''
-            lon_csv = str(lon) if lon is not None else ''
-            csv_row = ",".join([snap_id, region_csv, lat_csv, lon_csv, key, iv]) + "\n"
-
+        for row in csv_rows:
             try:
-                f.write(csv_row)
-            except Exception:
-                print("Failed to write row:", snap_id)
+                f.write(",".join(row) + "\n")
+            except Exception as e:
+                print("CSV write error:", e)
 
-            snap_list.append({
-                'snap_id': snap_id,
-                'region': region,
-                'latitude': lat,
-                'longitude': lon,
-                'key': key,
-                'iv': iv,
-                # populated by parse_scdb
-                'capture_time': '',
-                'duration': None,
-                'download_url': '',
-                'format': '',
-                'file_path': '',
-            })
-
-    return snap_list
+    return snaps
 
 
-def parse_scdb(scdb_path, output_path, download_files, snap_list):
+def parse_scdb(scdb_path, output_path, download_files, gallery_snaps, log_callback=None) -> list:
+    def _log(msg, lvl="INFO"):
+        if log_callback:
+            log_callback(msg, lvl)
+        else:
+            print(msg)
 
     if download_files:
         download_folder = os.path.join(output_path, "snaps")
@@ -286,48 +275,56 @@ def parse_scdb(scdb_path, output_path, download_files, snap_list):
     conn = sqlite3.connect(scdb_path)
     cur = conn.cursor()
 
-    for snap in snap_list:
-        try:
-            snap_id = snap['snap_id']
-            query = Template(scdb_query).substitute(SNAPID=snap_id)
-            cur.execute(query)
-            result = cur.fetchall()
+    downloadable = [s for s in gallery_snaps]
+    total = len(downloadable)
 
+    for i, snap in enumerate(downloadable):
+        try:
+            query = Template(scdb_query).substitute(SNAPID=snap["snap_id"])
+            cur.execute(query)
+            result = cur.fetchone()
             if not result:
                 continue
 
-            row = result[0]
-            snap['capture_time'] = _convert_core_data_ts(row[0])
-            snap['duration'] = row[1]
-            snap['download_url'] = row[2] or ''
-            snap['format'] = row[3] or ''
+            capture_ts, duration, media_url, media_format = result
 
-            if download_files and row[2]:
-                url = row[2]
-                file = wget.download(url, out=download_folder)
-                file_format = snap['format']
+            if capture_ts is not None:
+                try:
+                    dt = datetime.fromtimestamp(capture_ts + 978307200, tz=timezone.utc)
+                    snap["capture_time"] = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                except Exception:
+                    snap["capture_time"] = str(capture_ts)
 
-                key = convert_to_bytes(snap['key'])
-                iv = convert_to_bytes(snap['iv'])
+            snap["duration"] = duration
+            snap["media_url"] = media_url
+            snap["media_format"] = media_format
 
-                if file_format == 'image_jpeg':
-                    decrypted_path = file + "-decrypted.jpeg"
-                elif file_format in ('video_hevc', 'video_avc'):
-                    decrypted_path = file + "-decrypted.mp4"
+            if download_files and media_url:
+                _log(f"Downloading snap {i + 1}/{total}: {snap['snap_id']}")
+                bin_path = os.path.join(download_folder, f"{snap['snap_id']}.bin")
+                downloaded = wget.download(media_url, out=bin_path)
+
+                key = convert_to_bytes(snap["key"])
+                iv = convert_to_bytes(snap["iv"])
+
+                if media_format == 'image_jpeg':
+                    out_path = downloaded + "-decrypted.jpeg"
+                elif media_format in ('video_hevc', 'video_avc'):
+                    out_path = downloaded + "-decrypted.mp4"
                 else:
-                    decrypted_path = file + "-decrypted.bin"
+                    out_path = downloaded + "-decrypted.bin"
 
-                with open(file, 'rb') as f:
+                with open(downloaded, 'rb') as f:
                     encrypted = f.read()
-
-                with open(decrypted_path, 'wb') as f:
+                with open(out_path, 'wb') as f:
                     f.write(AES.new(key[:32], AES.MODE_CBC, iv).decrypt(encrypted))
+                os.remove(downloaded)
 
-                os.remove(file)
-                snap['file_path'] = os.path.join("snaps", os.path.basename(decrypted_path))
+                snap["file_path"] = out_path
+                _log(f"Snap {i + 1}/{total} saved: {os.path.basename(out_path)}", "OK")
 
         except Exception as e:
-            print("Failed processing snap:", snap.get('snap_id', ''), e)
+            _log(f"Error processing snap {snap.get('snap_id')}: {e}", "ERROR")
 
     conn.close()
-    return snap_list
+    return gallery_snaps
