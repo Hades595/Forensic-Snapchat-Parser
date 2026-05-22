@@ -8,13 +8,20 @@ def generate_report(case_name: str, snaps: list, output_path: str, examiner: str
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
     template = env.get_template("report_template.html")
 
+    processed_snaps = []
+    for snap in snaps:
+        s = snap.copy()
+        if s.get("file_path"):
+            s["file_path"] = os.path.relpath(s["file_path"], output_path).replace(os.sep, "/")
+        processed_snaps.append(s)
+
     html = template.render(
         case_name=case_name,
         examiner=examiner,
         platform="Android",
         generated_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-        snap_count=len(snaps),
-        snaps=snaps,
+        snap_count=len(processed_snaps),
+        snaps=processed_snaps,
     )
 
     report_path = os.path.join(output_path, "forensic_report.html")
