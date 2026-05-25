@@ -7,6 +7,7 @@ from string import Template
 from datetime import datetime, timezone
 from Crypto.Cipher import AES
 from parsers.ios.reporting import generate_report
+from parsers.chats.arroyo import find_arroyo, parse_arroyo, find_names_db_ios, load_names_ios
 
 SQLITE_FILE_HEADER = "SQLite format 3\x00"
 DEFAULT_PAGESIZE = 1024
@@ -117,7 +118,32 @@ def process_ios(
         log_callback=_log,
     )
 
-    report_path = generate_report(case_name, snaps, case_folder, examiner)
+    arroyo_src = find_arroyo(input_path)
+    chats = []
+    chat_sources = []
+    if arroyo_src:
+        arroyo_dest = os.path.join(case_folder, "arroyo.db")
+        shutil.copy2(arroyo_src, arroyo_dest)
+        _log(f"arroyo.db copied: {arroyo_dest}")
+        arroyo_wal_src = arroyo_src + "-wal"
+        if os.path.exists(arroyo_wal_src):
+            shutil.copy2(arroyo_wal_src, arroyo_dest + "-wal")
+            _log("arroyo.db-wal copied")
+        chat_sources.append("arroyo.db")
+        names_src = find_names_db_ios(input_path)
+        names = {}
+        if names_src:
+            names_dest = os.path.join(case_folder, "friending_notification_snapchatter.db")
+            shutil.copy2(names_src, names_dest)
+            _log(f"friending_notification_snapchatter.db copied: {names_dest}")
+            names = load_names_ios(names_dest)
+            chat_sources.append("friending_notification_snapchatter.db")
+        chats = parse_arroyo(arroyo_dest, names=names, log_callback=_log)
+    else:
+        _log("arroyo.db not found — chats tab will be empty", "INFO")
+
+    snap_sources = ["gallery.encrypteddb", "gallery.recovered.sqlite", os.path.basename(scdb_path)]
+    report_path = generate_report(case_name, snaps, chats, snap_sources, chat_sources, case_folder, examiner)
     _log(f"Report generated: {report_path}", "OK")
     return report_path
 
@@ -165,6 +191,9 @@ def repair_sqlite_db(input_db, output_db):
         for line in conn.iterdump():
             f.write(f"{line}\n")
     conn.close()
+
+    if os.path.exists(output_db):
+        os.remove(output_db)
 
     conn = sqlite3.connect(output_db)
     with open(dump_file, "r", encoding="utf-8") as f:

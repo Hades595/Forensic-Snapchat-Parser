@@ -5,6 +5,7 @@ import base64
 import wget
 from Crypto.Cipher import AES
 from parsers.android.reporting import generate_report
+from parsers.chats.arroyo import find_arroyo, parse_arroyo, find_names_db_android, load_names_android
 
 
 def process_android(
@@ -55,7 +56,32 @@ def process_android(
         log_callback=_log,
     )
 
-    report_path = generate_report(case_name, snaps, case_folder, examiner)
+    arroyo_src = find_arroyo(input_path)
+    chats = []
+    chat_sources = []
+    if arroyo_src:
+        arroyo_dest = os.path.join(case_folder, "arroyo.db")
+        shutil.copy2(arroyo_src, arroyo_dest)
+        _log(f"arroyo.db copied: {arroyo_dest}")
+        arroyo_wal_src = arroyo_src + "-wal"
+        if os.path.exists(arroyo_wal_src):
+            shutil.copy2(arroyo_wal_src, arroyo_dest + "-wal")
+            _log("arroyo.db-wal copied")
+        chat_sources.append("arroyo.db")
+        names_src = find_names_db_android(input_path)
+        names = {}
+        if names_src:
+            names_dest = os.path.join(case_folder, "main.db")
+            shutil.copy2(names_src, names_dest)
+            _log(f"main.db copied: {names_dest}")
+            names = load_names_android(names_dest)
+            chat_sources.append("main.db")
+        chats = parse_arroyo(arroyo_dest, names=names, log_callback=_log)
+    else:
+        _log("arroyo.db not found — chats tab will be empty", "INFO")
+
+    snap_sources = [os.path.basename(memories_dest)]
+    report_path = generate_report(case_name, snaps, chats, snap_sources, chat_sources, case_folder, examiner)
     _log(f"Report generated: {report_path}", "OK")
     return report_path
 
