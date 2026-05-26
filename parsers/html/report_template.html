@@ -219,6 +219,20 @@
   /* ── Empty state ── */
   .no-data { text-align: center; padding: 48px; color: #6b7280; font-style: italic; border: 1px dashed #d1d5db; border-radius: 6px; }
 
+  /* ── Snap card (inline in chat Snap-type message rows) ── */
+  .snap-card {
+    display: inline-block;
+    margin-top: 5px;
+    padding: 5px 8px;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 4px;
+    font-size: 10px;
+    color: #0369a1;
+  }
+  .snap-card .snap-thumb { display: block; margin-top: 4px; max-width: 140px; max-height: 100px; border-radius: 3px; }
+  .snap-card .snap-meta  { color: #6b7280; margin-top: 2px; }
+
   /* ── Sender row tinting (s0 = default white; s1–s3 cycle for each participant) ── */
   .summary-table tr.s1 td { background: #f0f9ff; }
   .summary-table tr.s1:hover { background: #dbeafe; }
@@ -228,6 +242,12 @@
   .summary-table tr.s3:hover { background: #fef3c7; }
 
   /* ── Sources box ── */
+  /* ── User profile card ── */
+  .profile-card { background:#fff; border-radius:8px; padding:28px 36px; box-shadow:0 1px 4px rgba(0,0,0,.08); max-width:540px; }
+  .profile-dl { display:grid; grid-template-columns:160px 1fr; gap:14px 16px; }
+  .profile-dl dt { color:#6b7280; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; }
+  .profile-dl dd { color:#111; font-size:13px; display:flex; align-items:center; word-break:break-all; }
+
   .sources-box {
     margin-top: 24px;
     padding: 12px 16px;
@@ -297,6 +317,10 @@
     <button class="tab-btn active" onclick="showTab('snaps', this)">Snaps</button>
     <button class="tab-btn" onclick="showTab('chats', this)">Chats</button>
     <button class="tab-btn" onclick="showTab('map', this)">Snap Map View</button>
+    <button class="tab-btn" onclick="showTab('user', this)">User</button>
+    <button class="tab-btn" onclick="showTab('friends', this)">Friends</button>
+    <button class="tab-btn" onclick="showTab('snaprecords', this)">Snap Records</button>
+    <button class="tab-btn" onclick="showTab('stories', this)">Stories</button>
   </div>
 </div>
 
@@ -312,8 +336,11 @@
         <th>#</th>
         <th>Snap ID</th>
         <th>Capture Time</th>
+        <th>Duration</th>
+        <th>Fav</th>
         <th>Format</th>
         <th>Region</th>
+        <th>Sent To</th>
         <th>Coordinates</th>
         <th>Preview</th>
       </tr>
@@ -324,8 +351,16 @@
         <td class="num">{{ loop.index }}</td>
         <td class="mono">{{ snap.snap_id[:24] }}{% if snap.snap_id|length > 24 %}…{% endif %}</td>
         <td>{{ snap.capture_time or '—' }}</td>
+        <td>{% if snap.duration is not none %}{{ "%.1f"|format(snap.duration) }} s{% else %}—{% endif %}</td>
+        <td>{{ '★' if snap.is_favorite else '—' }}</td>
         <td>{% if snap.media_format %}{% if 'image' in snap.media_format %}Image{% elif 'video' in snap.media_format %}Video{% else %}{{ snap.media_format | replace('_', ' ') | title }}{% endif %}{% else %}—{% endif %}</td>
         <td>{{ snap.region or '—' }}</td>
+        <td>
+          {% if snap.sent_to %}
+            {{ snap.sent_to.participants | join(', ') if snap.sent_to.participants else snap.sent_to.conversation_id[:20] }}
+            {% if snap.sent_to.sent_at %}<div style="font-size:10px;color:#9ca3af;">{{ snap.sent_to.sent_at }}</div>{% endif %}
+          {% else %}—{% endif %}
+        </td>
         <td class="mono">
           {% if snap.latitude is not none and snap.longitude is not none %}
             {{ "%.5f"|format(snap.latitude) }}, {{ "%.5f"|format(snap.longitude) }}
@@ -370,8 +405,12 @@
     <div class="sidebar-header">{{ conversations | length }} Conversation{{ 's' if conversations | length != 1 else '' }}</div>
     {% for conv in conversations %}
     <a class="sidebar-conv" id="sidebar-item-{{ loop.index }}" href="#conv-{{ loop.index }}">
-      <div class="sidebar-participants">{{ conv.participants | join(', ') if conv.participants else '(unknown)' }}</div>
-      <div class="sidebar-conv-meta">{{ conv.message_count }} msg{{ 's' if conv.message_count != 1 else '' }} &nbsp;·&nbsp; {{ conv.conversation_id[:18] }}{% if conv.conversation_id | length > 18 %}…{% endif %}</div>
+      <div class="sidebar-participants">
+        {% if conv.title %}{{ conv.title }}{% else %}{{ conv.participants | join(', ') if conv.participants else '(unknown)' }}{% endif %}
+      </div>
+      <div class="sidebar-conv-meta">
+        {% if conv.title and conv.participants %}{{ conv.participants | join(', ') }} &nbsp;·&nbsp; {% endif %}{{ conv.message_count }} msg{{ 's' if conv.message_count != 1 else '' }}
+      </div>
     </a>
     {% endfor %}
   </aside>
@@ -382,7 +421,12 @@
     {% for conv in conversations %}
     <div class="conv-block" id="conv-{{ loop.index }}">
       <h3 class="conv-heading">
-        {{ conv.participants | join(' &amp; ') if conv.participants else 'Unknown' }}
+        {% if conv.title %}
+          {{ conv.title }}
+          <span style="font-size:11px;color:#6b7280;font-weight:400;"> &nbsp;—&nbsp; {{ conv.participants | join(', ') if conv.participants else '' }}</span>
+        {% else %}
+          {{ conv.participants | join(' &amp; ') if conv.participants else 'Unknown' }}
+        {% endif %}
         <span class="conv-id">&nbsp;{{ conv.conversation_id }}</span>
         <span style="font-size:11px;color:#6b7280;font-weight:400;"> &nbsp;({{ conv.message_count }} message{{ 's' if conv.message_count != 1 else '' }})</span>
       </h3>
@@ -402,13 +446,34 @@
         </thead>
         <tbody>
           {% for msg in conv.messages %}
+          {% set snap_ref = snap_ref_lookup.get(msg.snap_id_ref) if msg.snap_id_ref else none %}
           <tr{% if msg.sender_index %} class="s{{ msg.sender_index % 4 or 3 }}"{% endif %}>
             <td class="num">{{ loop.index }}</td>
             <td>{{ msg.timestamp or '—' }}</td>
             <td class="mono">{{ msg.sender_id[:20] }}{% if msg.sender_id|length > 20 %}…{% endif %}</td>
-            <td>{{ msg.sender_name or '—' }}</td>
+            <td>
+              {{ msg.sender_name or '—' }}
+              {% if msg.sender_phone %}<div style="font-size:10px;color:#6b7280;">{{ msg.sender_phone }}</div>{% endif %}
+            </td>
             <td>{{ msg.content_type }}</td>
-            <td>{{ msg.message_content or '—' }}</td>
+            <td>
+              {{ msg.message_content or '' }}
+              {% if snap_ref %}
+              <div class="snap-card">
+                <strong>Snap</strong>
+                {% if snap_ref.capture_time %} · {{ snap_ref.capture_time }}{% endif %}
+                {% if snap_ref.media_format %} · {% if 'image' in snap_ref.media_format %}Image{% elif 'video' in snap_ref.media_format %}Video{% endif %}{% endif %}
+                {% if snap_ref.file_path %}
+                  {% if snap_ref.media_format == 'image_jpeg' %}
+                    <img src="{{ snap_ref.file_path }}" class="snap-thumb" alt="">
+                  {% elif snap_ref.media_format in ('video_hevc', 'video_avc') %}
+                    <video src="{{ snap_ref.file_path }}" class="snap-thumb" muted></video>
+                  {% endif %}
+                {% endif %}
+                {% if snap_ref.region %}<div class="snap-meta">{{ snap_ref.region }}</div>{% endif %}
+              </div>
+              {% elif not msg.message_content %}—{% endif %}
+            </td>
             <td>{{ msg.state }}</td>
             <td>{{ '✓' if msg.is_saved else '—' }}</td>
             <td>{{ '✓' if msg.is_viewed else '—' }}</td>
@@ -444,6 +509,209 @@
   {% else %}
   <div class="map-no-data">No location data available for this extraction.</div>
   {% endif %}
+
+</div>
+
+<!-- ══════════════ USER TAB ══════════════ -->
+<div id="tab-user" class="tab-pane">
+
+  <h2 class="section-heading">Account Profile</h2>
+
+  {% if user_profile and (user_profile.username or user_profile.email or user_profile.user_id) %}
+  <div class="profile-card">
+    <dl class="profile-dl">
+      {% if user_profile.user_id %}
+      <dt>User ID</dt>
+      <dd class="mono" style="font-size:11px;">{{ user_profile.user_id }}</dd>
+      {% endif %}
+      <dt>Username</dt>
+      <dd>{{ user_profile.username or '—' }}</dd>
+      <dt>Full Name</dt>
+      <dd>{{ user_profile.full_name or '—' }}</dd>
+      <dt>Date of Birth</dt>
+      <dd>{{ user_profile.dob or '—' }}</dd>
+      <dt>Email</dt>
+      <dd>{{ user_profile.email or '—' }}</dd>
+      <dt>Phone Number</dt>
+      <dd>{{ user_profile.phone or '—' }}</dd>
+      <dt>Locale / Country</dt>
+      <dd>{{ user_profile.locale or '—' }}</dd>
+    </dl>
+  </div>
+  {% else %}
+  <div class="no-data">No user profile data found for this extraction.</div>
+  {% endif %}
+
+  <div class="sources-box" style="margin-top:24px; max-width:540px;">
+    <strong>Source Databases</strong>
+    <code>core.db</code> &nbsp;·&nbsp; <code>SnapUserStore</code>
+  </div>
+
+</div>
+
+<!-- ══════════════ FRIENDS TAB ══════════════ -->
+<div id="tab-friends" class="tab-pane">
+
+  <h2 class="section-heading">Friends — {{ friends | length }} contact{{ 's' if friends | length != 1 else '' }}</h2>
+
+  {% if friends %}
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Pic</th>
+        <th>Username</th>
+        <th>Display Name</th>
+        <th>User ID</th>
+        <th>Score</th>
+        <th>Score Updated</th>
+        <th>Added</th>
+        <th>Streak</th>
+        <th>Streak Expires</th>
+        <th>Phone</th>
+        <th>Badges</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for friend in friends %}
+      <tr>
+        <td class="num">{{ loop.index }}</td>
+        <td>
+          {% if friend.profile_pic_url %}
+            <img src="{{ friend.profile_pic_url }}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" alt="">
+          {% else %}—{% endif %}
+        </td>
+        <td class="mono">{{ friend.username or '—' }}</td>
+        <td>{{ friend.display_name or '—' }}</td>
+        <td class="mono" style="font-size:10px;">{{ friend.user_id or '—' }}</td>
+        <td class="num">{{ friend.score if friend.score is not none else '—' }}</td>
+        <td style="font-size:10px;">{{ friend.score_updated or '—' }}</td>
+        <td style="font-size:10px;">{{ friend.added or '—' }}</td>
+        <td class="num">{{ friend.streak if friend.streak is not none else '—' }}</td>
+        <td style="font-size:10px;">{{ friend.streak_expires or '—' }}</td>
+        <td class="mono">{{ friend.phone or '—' }}</td>
+        <td style="font-size:14px; letter-spacing:2px;">
+          {% if friend.is_official %}⭐{% endif %}
+          {% if friend.is_brand %}🏢{% endif %}
+          {% if friend.is_plus %}➕{% endif %}
+          {% if not friend.is_official and not friend.is_brand and not friend.is_plus %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="no-data">No friend records found in main.db.</div>
+  {% endif %}
+
+  <div class="sources-box">
+    <strong>Source Databases</strong>
+    <code>main.db</code> &nbsp;·&nbsp; <code>Friend</code> + <code>FriendScore</code>
+  </div>
+
+</div>
+
+<!-- ══════════════ SNAP RECORDS TAB ══════════════ -->
+<div id="tab-snaprecords" class="tab-pane">
+
+  <h2 class="section-heading">Snap Records — {{ snap_records | length }} record{{ 's' if snap_records | length != 1 else '' }}</h2>
+
+  {% if snap_records %}
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Snap ID</th>
+        <th>Timestamp</th>
+        <th>Type</th>
+        <th>Group Type</th>
+        <th>Duration</th>
+        <th>Story Row</th>
+        <th>Media URL</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rec in snap_records %}
+      <tr>
+        <td class="num">{{ loop.index }}</td>
+        <td class="mono" style="font-size:10px;">{{ rec.snap_id[:32] }}{% if rec.snap_id | length > 32 %}…{% endif %}</td>
+        <td style="font-size:10px;">{{ rec.timestamp or '—' }}</td>
+        <td class="num">{{ rec.snap_type if rec.snap_type is not none else '—' }}</td>
+        <td>{{ rec.group_type or '—' }}</td>
+        <td class="num">
+          {% if rec.is_infinite %}∞
+          {% elif rec.duration_s is not none %}{{ "%.1f"|format(rec.duration_s) }} s
+          {% else %}—{% endif %}
+        </td>
+        <td class="num">{{ rec.story_row_id if rec.story_row_id is not none else '—' }}</td>
+        <td style="font-size:10px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          {% if rec.media_url %}
+            <a href="{{ rec.media_url }}" title="{{ rec.media_url }}">{{ rec.media_url[:50] }}{% if rec.media_url | length > 50 %}…{% endif %}</a>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="no-data">No snap records found in main.db.</div>
+  {% endif %}
+
+  <div class="sources-box">
+    <strong>Source Databases</strong>
+    <code>main.db</code> &nbsp;·&nbsp; <code>Snap</code>
+  </div>
+
+</div>
+
+<!-- ══════════════ STORIES TAB ══════════════ -->
+<div id="tab-stories" class="tab-pane">
+
+  <h2 class="section-heading">Stories — {{ stories | length }} stor{{ 'ies' if stories | length != 1 else 'y' }}</h2>
+
+  {% if stories %}
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Story ID</th>
+        <th>Display Name</th>
+        <th>Username</th>
+        <th>User ID</th>
+        <th>Latest</th>
+        <th>Expires</th>
+        <th>Viewed</th>
+        <th>Kind</th>
+        <th>Group Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for story in stories %}
+      <tr>
+        <td class="num">{{ loop.index }}</td>
+        <td class="mono" style="font-size:10px;">{{ story.story_id[:24] }}{% if story.story_id | length > 24 %}…{% endif %}</td>
+        <td>{{ story.display_name or '—' }}</td>
+        <td class="mono">{{ story.username or '—' }}</td>
+        <td class="mono" style="font-size:10px;">{{ story.user_id or '—' }}</td>
+        <td style="font-size:10px;">{{ story.latest or '—' }}</td>
+        <td style="font-size:10px;">{{ story.expires or '—' }}</td>
+        <td class="num">{{ '✓' if story.viewed else '—' }}</td>
+        <td class="num">{{ story.kind if story.kind is not none else '—' }}</td>
+        <td class="num">{{ story.group_story_type if story.group_story_type is not none else '—' }}</td>
+        <td style="font-size:10px; max-width:180px;">{{ story.description or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="no-data">No story records found in main.db.</div>
+  {% endif %}
+
+  <div class="sources-box">
+    <strong>Source Databases</strong>
+    <code>main.db</code> &nbsp;·&nbsp; <code>Story</code>
+  </div>
 
 </div>
 

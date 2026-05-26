@@ -153,6 +153,26 @@ def _format_ts(ms) -> str | None:
         return str(ms)
 
 
+# ── Snap cross-reference ──────────────────────────────────────────────────────
+
+def _extract_snap_ref(blob: bytes, known_ids: set) -> str | None:
+    """Return the first string in a Snap message_content protobuf that matches a known snap ID.
+
+    Intentionally skips _is_noise() — snap IDs look exactly like noise (UUIDs,
+    long alphanumeric keys) and must be identified purely by cross-reference.
+    """
+    if not blob or not known_ids:
+        return None
+    try:
+        for s in _extract_strings(bytes(blob)):
+            s = s.strip().lstrip('$')   # some IDs carry a leading '$'
+            if s in known_ids:
+                return s
+    except Exception:
+        pass
+    return None
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def find_arroyo(input_path: str) -> str | None:
@@ -202,6 +222,31 @@ def load_names_android(db_path: str) -> dict:
     return names
 
 
+def load_contacts_android(db_path: str) -> dict:
+    """Return {userId: phone} from main.db Friend LEFT JOIN Contact.
+
+    The Contact table links to Friend via Contact.friendRowId = Friend._id.
+    Only entries with a non-empty phone are included.
+    """
+    contacts = {}
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT f.userId, c.phone
+            FROM Friend f
+            LEFT JOIN Contact c ON c.friendRowId = f._id
+            WHERE c.phone IS NOT NULL AND c.phone != ''
+        """)
+        for user_id, phone in cur.fetchall():
+            if user_id:
+                contacts[user_id] = phone
+        conn.close()
+    except Exception:
+        pass
+    return contacts
+
+
 def load_names_ios(db_path: str) -> dict:
     """Return {userId: display_name} from friending_notification_snapchatter table.
 
@@ -225,7 +270,29 @@ def load_names_ios(db_path: str) -> dict:
     return names
 
 
-def parse_arroyo(db_path: str, names: dict = None, log_callback=None) -> list:
+def load_conversation_titles(db_path: str) -> dict:
+    """Return {conv_id: {"title": str|None, "type": int|None}} from feed_entry in arroyo.db."""
+    titles = {}
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT client_conversation_id, conversation_title, conversation_type
+            FROM feed_entry
+            WHERE client_conversation_id IS NOT NULL
+        """)
+        for conv_id, title, conv_type in cur.fetchall():
+            titles[conv_id] = {
+                "title": title if title else None,
+                "type":  conv_type,
+            }
+        conn.close()
+    except Exception:
+        pass
+    return titles
+
+
+def parse_arroyo(db_path: str, snap_lookup: dict = None, names: dict = None, contacts: dict = None, log_callback=None) -> list:
     """Query conversation_message in arroyo.db and return a list of chat dicts."""
     def _log(msg, lvl="INFO"):
         if log_callback:
@@ -252,17 +319,23 @@ def parse_arroyo(db_path: str, names: dict = None, log_callback=None) -> list:
         content_type = CONTENT_TYPE_LABELS.get(content_type_int, f"Type {content_type_int}")
         sender_id_str = sender_id or ""
 
+        snap_id_ref = None
+        if content_type_int == 2 and snap_lookup:
+            snap_id_ref = _extract_snap_ref(message_blob, set(snap_lookup.keys()))
+
         chats.append({
             "conversation_id":  conv_id or "",
             "message_id":       msg_id,
             "server_id":        server_id,
             "sender_id":        sender_id_str,
             "sender_name":      names.get(sender_id_str) if names and sender_id_str else None,
+            "sender_phone":     contacts.get(sender_id_str) if contacts and sender_id_str else None,
             "timestamp":        _format_ts(creation_ts),
             "timestamp_ms":     creation_ts or 0,
             "read_timestamp":   _format_ts(read_ts),
             "content_type":     content_type,
             "message_content":  _decode_message_content(message_blob),
+            "snap_id_ref":      snap_id_ref,
             "state":            state or "",
             "is_saved":         bool(is_saved),
             "is_viewed":        bool(is_viewed),

@@ -7,7 +7,8 @@ from string import Template
 from datetime import datetime, timezone
 from Crypto.Cipher import AES
 from parsers.ios.reporting import generate_report
-from parsers.chats.arroyo import find_arroyo, parse_arroyo, find_names_db_ios, load_names_ios
+from parsers.chats.arroyo import find_arroyo, parse_arroyo, load_conversation_titles, find_names_db_ios, load_names_ios
+from parsers.ios.main_db import parse_friends_ios, parse_user_profile_ios
 
 SQLITE_FILE_HEADER = "SQLite format 3\x00"
 DEFAULT_PAGESIZE = 1024
@@ -118,9 +119,18 @@ def process_ios(
         log_callback=_log,
     )
 
+    # Extract account profile from ZGALLERYPROFILE in already-copied scdb
+    user_profile = parse_user_profile_ios(scdb_path)
+    _log(f"User profile: user_id={user_profile.get('user_id') or '(unknown)'}")
+
+    # Build snap_id → snap dict for cross-referencing with arroyo Snap messages
+    snap_lookup = {s["snap_id"]: s for s in snaps if s.get("snap_id")}
+
     arroyo_src = find_arroyo(input_path)
     chats = []
     chat_sources = []
+    conv_titles = {}
+    friends = []
     if arroyo_src:
         arroyo_dest = os.path.join(case_folder, "arroyo.db")
         shutil.copy2(arroyo_src, arroyo_dest)
@@ -130,6 +140,8 @@ def process_ios(
             shutil.copy2(arroyo_wal_src, arroyo_dest + "-wal")
             _log("arroyo.db-wal copied")
         chat_sources.append("arroyo.db")
+        conv_titles = load_conversation_titles(arroyo_dest)
+        _log(f"Loaded {len(conv_titles)} conversation entries from feed_entry")
         names_src = find_names_db_ios(input_path)
         names = {}
         if names_src:
@@ -137,13 +149,34 @@ def process_ios(
             shutil.copy2(names_src, names_dest)
             _log(f"friending_notification_snapchatter.db copied: {names_dest}")
             names = load_names_ios(names_dest)
+            friends = parse_friends_ios(names_dest)
+            _log(f"friending_notification_snapchatter.db: {len(friends)} friends")
             chat_sources.append("friending_notification_snapchatter.db")
-        chats = parse_arroyo(arroyo_dest, names=names, log_callback=_log)
+        chats = parse_arroyo(arroyo_dest, snap_lookup=snap_lookup, names=names, log_callback=_log)
+
+        # Populate sent_to on matched snaps (snap_lookup shares refs with snaps list)
+        conv_participants: dict = {}
+        for msg in chats:
+            cid = msg["conversation_id"]
+            label = msg.get("sender_name") or msg.get("sender_id") or ""
+            if label and label not in conv_participants.get(cid, []):
+                conv_participants.setdefault(cid, []).append(label)
+        for msg in chats:
+            sid = msg.get("snap_id_ref")
+            if sid and sid in snap_lookup and "sent_to" not in snap_lookup[sid]:
+                snap_lookup[sid]["sent_to"] = {
+                    "conversation_id": msg["conversation_id"],
+                    "participants":    conv_participants.get(msg["conversation_id"], []),
+                    "sent_at":         msg["timestamp"],
+                }
     else:
         _log("arroyo.db not found — chats tab will be empty", "INFO")
 
     snap_sources = ["gallery.encrypteddb", "gallery.recovered.sqlite", os.path.basename(scdb_path)]
-    report_path = generate_report(case_name, snaps, chats, snap_sources, chat_sources, case_folder, examiner)
+    report_path = generate_report(
+        case_name, snaps, chats, snap_sources, chat_sources, case_folder, examiner,
+        friends=friends, user_profile=user_profile, conv_titles=conv_titles,
+    )
     _log(f"Report generated: {report_path}", "OK")
     return report_path
 
