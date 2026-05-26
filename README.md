@@ -95,6 +95,48 @@ Forensic-Snapchat-Parser/
 
 ---
 
+## Database Sources
+
+### Android
+**Root:** `com.snapchat.android/`
+
+| Path | Data | Parsed |
+|---|---|---|
+| `databases/memories.db` | Snap memories — media URLs, AES keys/IVs, GPS coords, capture timestamps, duration, favourite/front-facing flags | ✅ |
+| `databases/arroyo.db` | Chat messages, conversation IDs, sender IDs, timestamps, read/save state, protobuf message content, group names | ✅ |
+| `databases/main.db` | Friends + scores (Friend × FriendScore), contact phone numbers, snap records, story records | ✅ |
+| `databases/core.db` | User profile — username, full name, DOB, email, phone, locale, account UUID | ✅ |
+| `databases/client_notifications.db` | Push notification history | ❌ |
+| `databases/creativetools.platform.db` | Creative tools usage (filters, stickers applied to snaps) | ❌ |
+| `databases/rtus.db` | Real-time update service — may contain notification/message history | ❌ |
+| `databases/simple_db_helper.db` | Unknown — very large (~86 MB), likely media cache metadata | ❌ |
+| `databases/{uuid}/contactscache.identity.db` | Cached contact identity data | ❌ |
+| `databases/native_content_manager/cache_controller.db` | Media/content cache controller | ❌ |
+| `databases/fidelius_database.db` | Encryption/authentication keys | ❌ |
+
+### iOS
+**Root:** `{DeviceUUID}/` (e.g. `182213FD-7993-4C96-BE7A-8EC70399100D/`)
+
+| Path | Data | Parsed |
+|---|---|---|
+| `Documents/gallery_encrypted_db/<n>/<uid>/gallery.encrypteddb` | AES-CBC encrypted database — snap decryption keys/IVs, GPS coordinates, region names | ✅ |
+| `Documents/gallery_data_object/<n>/<uid>/scdb-<n>.sqlite3` | Snap metadata — capture time UTC, duration, media download URLs, media format, gallery profile (user UUID) | ✅ |
+| `Documents/user_scoped/<uid>/arroyo/arroyo.db` | Chat messages, conversation IDs, sender IDs, timestamps, read/save state, protobuf content, group names | ✅ |
+| `Documents/friending_notification_snapchatter.db` | Friends list — userId, username, display name, contact origin, added timestamp, friend type | ✅ |
+| `Library/Caches/SCCache/` | **Cleartext cached snaps** — previously viewed/received snaps, no decryption needed | ❌ |
+| `Library/Caches/SCMediaCache/` | Cleartext cached media (stories, received snaps) | ❌ |
+| `Library/Caches/SCPersistentMedia/` | Persistently cached media files | ❌ |
+| `Documents/user_scoped/<uid>/databases/content_feed_database` | Cached story/Discover feed content | ❌ |
+| `Documents/user_scoped/<uid>/DocObjects/primary.docobjects` | CloudKit document store — structured user-scoped object data (format unknown, high forensic value) | ❌ |
+| `Documents/global_scoped/global-scoped-preferences/preferences.sqlite` | App preferences — session username and phone number keys (values are binary-serialised) | ❌ |
+| `Documents/gallery_search/<n>/<uid>/search.sqlite3` | FTS index — snap descriptions, location tags, time tags | ❌ |
+| `Documents/user_scoped/<uid>/databases/memories_asset_repository.sqlite` | Memories asset links — asset IDs, download URLs, encryption key/IV references | ❌ |
+| `Documents/user_scoped/<uid>/databases/convo_safety.db` | Conversation safety flags — reported messages, moderation prompts | ❌ |
+| `Documents/Valdi/sqlite/<uuid>/CallLog.db` | Voice/video call log — participants, timestamps, duration | ❌ |
+| `Library/Application Support/fidelius_user_db/<n>/<uuid>/fidelius_user.db` | End-to-end encryption keys — identity keys, per-message keys, per-snap encryption keys | ❌ |
+
+---
+
 ## Platform Detection
 
 The tool detects the platform automatically from the selected folder name:
