@@ -147,6 +147,36 @@
   .summary-table td.mono { font-family: "Courier New", monospace; font-size: 11px; }
   .summary-table .thumb { max-width: 160px; max-height: 120px; border-radius: 3px; vertical-align: middle; display: block; }
 
+  /* ── Pagination controls ── */
+  .pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 10px 4px 28px;
+    font-size: 11px;
+    color: #6b7280;
+  }
+  .pager button {
+    background: #2563eb;
+    border: none;
+    color: #fff;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .pager button:hover:not(:disabled) { background: #1d4ed8; }
+  .pager button:disabled { background: #c5c7cc; cursor: default; }
+  .pager select {
+    border: 1px solid #c5c7cc;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 11px;
+    background: #fff;
+    color: #111;
+  }
+
   /* ── Smooth scroll ── */
   html { scroll-behavior: smooth; }
 
@@ -301,12 +331,12 @@
 
   <div class="cover-coc">
     <strong>Chain of Custody &amp; Integrity Statement</strong>
-    This report was generated automatically from device data extracted using a UFED forensic acquisition.
+    This report was generated automatically from device data extracted using a forensic acquisition and is intended solely as a review aid.
+    While every effort has been made to accurately represent the extracted data, the original extraction output remains the authoritative source of evidence and should be relied upon for verification and evidential purposes.
     All database files were copied to the case output folder prior to analysis; originals were not modified.
     Encrypted media files were decrypted in-place using keys and initialisation vectors recovered from the
     Snapchat application database. The integrity of the source data should be verified against examiner
-    notes and UFED extraction logs. This document is intended for use in legal proceedings and must not
-    be altered after generation.
+    notes and the extraction, which take precedence over the contents of this report.
   </div>
 </div>
 
@@ -335,7 +365,7 @@
       <tr>
         <th>#</th>
         <th>Snap ID</th>
-        <th>Capture Time</th>
+        <th>Capture Time (UTC)</th>
         <th>Duration</th>
         <th>Fav</th>
         <th>Format</th>
@@ -345,42 +375,9 @@
         <th>Preview</th>
       </tr>
     </thead>
-    <tbody>
-      {% for snap in snaps %}
-      <tr>
-        <td class="num">{{ loop.index }}</td>
-        <td class="mono">{{ snap.snap_id[:24] }}{% if snap.snap_id|length > 24 %}…{% endif %}</td>
-        <td>{{ snap.capture_time or '—' }}</td>
-        <td>{% if snap.duration is not none %}{{ "%.1f"|format(snap.duration) }} s{% else %}—{% endif %}</td>
-        <td>{{ '★' if snap.is_favorite else '—' }}</td>
-        <td>{% if snap.media_format %}{% if 'image' in snap.media_format %}Image{% elif 'video' in snap.media_format %}Video{% else %}{{ snap.media_format | replace('_', ' ') | title }}{% endif %}{% else %}—{% endif %}</td>
-        <td>{{ snap.region or '—' }}</td>
-        <td>
-          {% if snap.sent_to %}
-            {{ snap.sent_to.participants | join(', ') if snap.sent_to.participants else snap.sent_to.conversation_id[:20] }}
-            {% if snap.sent_to.sent_at %}<div style="font-size:10px;color:#9ca3af;">{{ snap.sent_to.sent_at }}</div>{% endif %}
-          {% else %}—{% endif %}
-        </td>
-        <td class="mono">
-          {% if snap.latitude is not none and snap.longitude is not none %}
-            {{ "%.5f"|format(snap.latitude) }}, {{ "%.5f"|format(snap.longitude) }}
-          {% else %}—{% endif %}
-        </td>
-        <td>
-          {% if snap.file_path %}
-            {% if snap.media_format == 'image_jpeg' %}
-              <img src="{{ snap.file_path }}" class="thumb" alt="">
-            {% elif snap.media_format in ('video_hevc', 'video_avc') %}
-              <video src="{{ snap.file_path }}" class="thumb" muted></video>
-            {% else %}
-              <span style="font-size:18px;">📄</span>
-            {% endif %}
-          {% else %}—{% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="tbody-snaps"></tbody>
   </table>
+  <div class="pager" id="pager-snaps"></div>
 
   {% else %}
   <div class="no-data">No snap records found for this extraction.</div>
@@ -444,43 +441,9 @@
             <th>Viewed</th>
           </tr>
         </thead>
-        <tbody>
-          {% for msg in conv.messages %}
-          {% set snap_ref = snap_ref_lookup.get(msg.snap_id_ref) if msg.snap_id_ref else none %}
-          <tr{% if msg.sender_index %} class="s{{ msg.sender_index % 4 or 3 }}"{% endif %}>
-            <td class="num">{{ loop.index }}</td>
-            <td>{{ msg.timestamp or '—' }}</td>
-            <td class="mono">{{ msg.sender_id[:20] }}{% if msg.sender_id|length > 20 %}…{% endif %}</td>
-            <td>
-              {{ msg.sender_name or '—' }}
-              {% if msg.sender_phone %}<div style="font-size:10px;color:#6b7280;">{{ msg.sender_phone }}</div>{% endif %}
-            </td>
-            <td>{{ msg.content_type }}</td>
-            <td>
-              {{ msg.message_content or '' }}
-              {% if snap_ref %}
-              <div class="snap-card">
-                <strong>Snap</strong>
-                {% if snap_ref.capture_time %} · {{ snap_ref.capture_time }}{% endif %}
-                {% if snap_ref.media_format %} · {% if 'image' in snap_ref.media_format %}Image{% elif 'video' in snap_ref.media_format %}Video{% endif %}{% endif %}
-                {% if snap_ref.file_path %}
-                  {% if snap_ref.media_format == 'image_jpeg' %}
-                    <img src="{{ snap_ref.file_path }}" class="snap-thumb" alt="">
-                  {% elif snap_ref.media_format in ('video_hevc', 'video_avc') %}
-                    <video src="{{ snap_ref.file_path }}" class="snap-thumb" muted></video>
-                  {% endif %}
-                {% endif %}
-                {% if snap_ref.region %}<div class="snap-meta">{{ snap_ref.region }}</div>{% endif %}
-              </div>
-              {% elif not msg.message_content %}—{% endif %}
-            </td>
-            <td>{{ msg.state }}</td>
-            <td>{{ '✓' if msg.is_saved else '—' }}</td>
-            <td>{{ '✓' if msg.is_viewed else '—' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
+        <tbody id="tbody-chat-{{ loop.index }}"></tbody>
       </table>
+      <div class="pager" id="pager-chat-{{ loop.index }}"></div>
     </div>
     {% endfor %}
 
@@ -572,34 +535,9 @@
         <th>Badges</th>
       </tr>
     </thead>
-    <tbody>
-      {% for friend in friends %}
-      <tr>
-        <td class="num">{{ loop.index }}</td>
-        <td>
-          {% if friend.profile_pic_url %}
-            <img src="{{ friend.profile_pic_url }}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" alt="">
-          {% else %}—{% endif %}
-        </td>
-        <td class="mono">{{ friend.username or '—' }}</td>
-        <td>{{ friend.display_name or '—' }}</td>
-        <td class="mono" style="font-size:10px;">{{ friend.user_id or '—' }}</td>
-        <td class="num">{{ friend.score if friend.score is not none else '—' }}</td>
-        <td style="font-size:10px;">{{ friend.score_updated or '—' }}</td>
-        <td style="font-size:10px;">{{ friend.added or '—' }}</td>
-        <td class="num">{{ friend.streak if friend.streak is not none else '—' }}</td>
-        <td style="font-size:10px;">{{ friend.streak_expires or '—' }}</td>
-        <td class="mono">{{ friend.phone or '—' }}</td>
-        <td style="font-size:14px; letter-spacing:2px;">
-          {% if friend.is_official %}⭐{% endif %}
-          {% if friend.is_brand %}🏢{% endif %}
-          {% if friend.is_plus %}➕{% endif %}
-          {% if not friend.is_official and not friend.is_brand and not friend.is_plus %}—{% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="tbody-friends"></tbody>
   </table>
+  <div class="pager" id="pager-friends"></div>
   {% else %}
   <div class="no-data">No friend records found in main.db.</div>
   {% endif %}
@@ -630,29 +568,9 @@
         <th>Media URL</th>
       </tr>
     </thead>
-    <tbody>
-      {% for rec in snap_records %}
-      <tr>
-        <td class="num">{{ loop.index }}</td>
-        <td class="mono" style="font-size:10px;">{{ rec.snap_id[:32] }}{% if rec.snap_id | length > 32 %}…{% endif %}</td>
-        <td style="font-size:10px;">{{ rec.timestamp or '—' }}</td>
-        <td class="num">{{ rec.snap_type if rec.snap_type is not none else '—' }}</td>
-        <td>{{ rec.group_type or '—' }}</td>
-        <td class="num">
-          {% if rec.is_infinite %}∞
-          {% elif rec.duration_s is not none %}{{ "%.1f"|format(rec.duration_s) }} s
-          {% else %}—{% endif %}
-        </td>
-        <td class="num">{{ rec.story_row_id if rec.story_row_id is not none else '—' }}</td>
-        <td style="font-size:10px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-          {% if rec.media_url %}
-            <a href="{{ rec.media_url }}" title="{{ rec.media_url }}">{{ rec.media_url[:50] }}{% if rec.media_url | length > 50 %}…{% endif %}</a>
-          {% else %}—{% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="tbody-snaprecords"></tbody>
   </table>
+  <div class="pager" id="pager-snaprecords"></div>
   {% else %}
   <div class="no-data">No snap records found in main.db.</div>
   {% endif %}
@@ -686,24 +604,9 @@
         <th>Description</th>
       </tr>
     </thead>
-    <tbody>
-      {% for story in stories %}
-      <tr>
-        <td class="num">{{ loop.index }}</td>
-        <td class="mono" style="font-size:10px;">{{ story.story_id[:24] }}{% if story.story_id | length > 24 %}…{% endif %}</td>
-        <td>{{ story.display_name or '—' }}</td>
-        <td class="mono">{{ story.username or '—' }}</td>
-        <td class="mono" style="font-size:10px;">{{ story.user_id or '—' }}</td>
-        <td style="font-size:10px;">{{ story.latest or '—' }}</td>
-        <td style="font-size:10px;">{{ story.expires or '—' }}</td>
-        <td class="num">{{ '✓' if story.viewed else '—' }}</td>
-        <td class="num">{{ story.kind if story.kind is not none else '—' }}</td>
-        <td class="num">{{ story.group_story_type if story.group_story_type is not none else '—' }}</td>
-        <td style="font-size:10px; max-width:180px;">{{ story.description or '—' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="tbody-stories"></tbody>
   </table>
+  <div class="pager" id="pager-stories"></div>
   {% else %}
   <div class="no-data">No story records found in main.db.</div>
   {% endif %}
@@ -715,11 +618,258 @@
 
 </div>
 
+<!-- ══════════════ REPORT DATA (embedded for client-side pagination) ══════════════ -->
+<script type="application/json" id="data-snaps">{{ snaps | tojson }}</script>
+<script type="application/json" id="data-conversations">{{ conversations | tojson }}</script>
+<script type="application/json" id="data-snap-refs">{{ snap_ref_lookup | tojson }}</script>
+<script type="application/json" id="data-friends">{{ friends | tojson }}</script>
+<script type="application/json" id="data-snaprecords">{{ snap_records | tojson }}</script>
+<script type="application/json" id="data-stories">{{ stories | tojson }}</script>
+
 <!-- ══════════════ SCRIPTS ══════════════ -->
 <script>
+  /* ── HTML escaping (the Jinja env has no autoescape=True, so rows built in JS escape explicitly) ── */
+  function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function toTitleCase(s) {
+    return s.replace(/\w\S*/g, function(t) { return t.charAt(0).toUpperCase() + t.substr(1).toLowerCase(); });
+  }
+
+  /* ── Generic client-side paginator: slices `data`, renders one page via renderRow, ──
+     ── and draws Prev/Next + page-size controls into pagerEl. Row numbering is absolute ──
+     ── (continuous across pages), matching the old Jinja loop.index behavior. ── */
+  function createPaginatedTable(tbodyEl, pagerEl, data, renderRow, opts) {
+    var pageSize = (opts && opts.pageSize) || 50;
+    var page = 1;
+
+    function totalPages() { return Math.max(1, Math.ceil(data.length / pageSize)); }
+
+    function render() {
+      var start = (page - 1) * pageSize;
+      var slice = data.slice(start, start + pageSize);
+      tbodyEl.innerHTML = slice.map(function(item, i) { return renderRow(item, start + i); }).join('');
+      renderPager();
+    }
+
+    function renderPager() {
+      var tp = totalPages();
+      pagerEl.innerHTML =
+        '<button' + (page <= 1 ? ' disabled' : '') + ' data-act="prev">Prev</button>' +
+        '<span>Page ' + page + ' of ' + tp + ' (' + data.length + ' row' + (data.length !== 1 ? 's' : '') + ')</span>' +
+        '<button' + (page >= tp ? ' disabled' : '') + ' data-act="next">Next</button>' +
+        '<select data-act="size">' +
+          [25, 50, 100, 200].map(function(n) {
+            return '<option value="' + n + '"' + (n === pageSize ? ' selected' : '') + '>' + n + '/page</option>';
+          }).join('') +
+        '</select>';
+      pagerEl.querySelector('[data-act="prev"]').onclick = function() { if (page > 1) { page--; render(); } };
+      pagerEl.querySelector('[data-act="next"]').onclick = function() { if (page < tp) { page++; render(); } };
+      pagerEl.querySelector('[data-act="size"]').onchange = function(e) { pageSize = +e.target.value; page = 1; render(); };
+    }
+
+    render();
+    return { refresh: render };
+  }
+
+  /* ── Row renderers (1:1 ports of the removed Jinja <tr> blocks) ── */
+  function renderSnapRow(snap, idx) {
+    var snapId = snap.snap_id || '';
+    var snapIdShort = escapeHtml(snapId.slice(0, 24)) + (snapId.length > 24 ? '…' : '');
+    var captureTime = snap.capture_time ? escapeHtml(snap.capture_time.replace(' UTC', '')) : '—';
+    var captureLocal = snap.capture_time_local
+      ? '<div style="font-size:10px;color:#6b7280;">' + escapeHtml(snap.capture_time_local) + '</div>' : '';
+    var duration = (snap.duration !== null && snap.duration !== undefined) ? snap.duration.toFixed(1) + ' s' : '—';
+    var fav = snap.is_favorite ? '★' : '—';
+    var format = '—';
+    if (snap.media_format) {
+      if (snap.media_format.indexOf('image') !== -1) format = 'Image';
+      else if (snap.media_format.indexOf('video') !== -1) format = 'Video';
+      else format = escapeHtml(toTitleCase(snap.media_format.replace(/_/g, ' ')));
+    }
+    var region = snap.region ? escapeHtml(snap.region) : '—';
+    var sentTo = '—';
+    if (snap.sent_to) {
+      var participants = (snap.sent_to.participants && snap.sent_to.participants.length)
+        ? snap.sent_to.participants.join(', ')
+        : (snap.sent_to.conversation_id || '').slice(0, 20);
+      sentTo = escapeHtml(participants);
+      if (snap.sent_to.sent_at) sentTo += '<div style="font-size:10px;color:#9ca3af;">' + escapeHtml(snap.sent_to.sent_at) + '</div>';
+    }
+    var coords = (snap.latitude !== null && snap.latitude !== undefined && snap.longitude !== null && snap.longitude !== undefined)
+      ? snap.latitude.toFixed(5) + ', ' + snap.longitude.toFixed(5) : '—';
+    var preview = '—';
+    if (snap.file_path) {
+      if (snap.media_format === 'image_jpeg') {
+        preview = '<img src="' + escapeHtml(snap.file_path) + '" class="thumb" alt="">';
+      } else if (snap.media_format === 'video_hevc' || snap.media_format === 'video_avc') {
+        preview = '<video src="' + escapeHtml(snap.file_path) + '" class="thumb" muted></video>';
+      } else {
+        preview = '<span style="font-size:18px;">📄</span>';
+      }
+    }
+    return '<tr>' +
+      '<td class="num">' + (idx + 1) + '</td>' +
+      '<td class="mono">' + snapIdShort + '</td>' +
+      '<td>' + captureTime + captureLocal + '</td>' +
+      '<td>' + duration + '</td>' +
+      '<td>' + fav + '</td>' +
+      '<td>' + format + '</td>' +
+      '<td>' + region + '</td>' +
+      '<td>' + sentTo + '</td>' +
+      '<td class="mono">' + coords + '</td>' +
+      '<td>' + preview + '</td>' +
+      '</tr>';
+  }
+
+  function renderChatRow(msg, idx, snapRefLookup) {
+    var rowClass = msg.sender_index ? ' class="s' + (msg.sender_index % 4 || 3) + '"' : '';
+    var senderId = msg.sender_id || '';
+    var senderIdShort = escapeHtml(senderId.slice(0, 20)) + (senderId.length > 20 ? '…' : '');
+    var senderName = msg.sender_name ? escapeHtml(msg.sender_name) : '—';
+    var senderPhone = msg.sender_phone
+      ? '<div style="font-size:10px;color:#6b7280;">' + escapeHtml(msg.sender_phone) + '</div>' : '';
+    var content = msg.message_content ? escapeHtml(msg.message_content) : '';
+    var snapRef = msg.snap_id_ref ? snapRefLookup[msg.snap_id_ref] : null;
+    var snapCard = '';
+    if (snapRef) {
+      var meta = '';
+      if (snapRef.capture_time) {
+        meta += ' · ' + escapeHtml(snapRef.capture_time.replace(' UTC', ''));
+        if (snapRef.capture_time_local) meta += ' / ' + escapeHtml(snapRef.capture_time_local);
+      }
+      if (snapRef.media_format) {
+        if (snapRef.media_format.indexOf('image') !== -1) meta += ' · Image';
+        else if (snapRef.media_format.indexOf('video') !== -1) meta += ' · Video';
+      }
+      var media = '';
+      if (snapRef.file_path) {
+        if (snapRef.media_format === 'image_jpeg') {
+          media = '<img src="' + escapeHtml(snapRef.file_path) + '" class="snap-thumb" alt="">';
+        } else if (snapRef.media_format === 'video_hevc' || snapRef.media_format === 'video_avc') {
+          media = '<video src="' + escapeHtml(snapRef.file_path) + '" class="snap-thumb" muted></video>';
+        }
+      }
+      var regionLine = snapRef.region ? '<div class="snap-meta">' + escapeHtml(snapRef.region) + '</div>' : '';
+      snapCard = '<div class="snap-card"><strong>Snap</strong>' + meta + media + regionLine + '</div>';
+    } else if (!msg.message_content) {
+      content = '—';
+    }
+    return '<tr' + rowClass + '>' +
+      '<td class="num">' + (idx + 1) + '</td>' +
+      '<td>' + (msg.timestamp ? escapeHtml(msg.timestamp) : '—') + '</td>' +
+      '<td class="mono">' + senderIdShort + '</td>' +
+      '<td>' + senderName + senderPhone + '</td>' +
+      '<td>' + escapeHtml(msg.content_type || '') + '</td>' +
+      '<td>' + content + snapCard + '</td>' +
+      '<td>' + escapeHtml(msg.state || '') + '</td>' +
+      '<td>' + (msg.is_saved ? '✓' : '—') + '</td>' +
+      '<td>' + (msg.is_viewed ? '✓' : '—') + '</td>' +
+      '</tr>';
+  }
+
+  function renderFriendRow(friend, idx) {
+    var pic = friend.profile_pic_url
+      ? '<img src="' + escapeHtml(friend.profile_pic_url) + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" alt="">'
+      : '—';
+    var badges = '';
+    if (friend.is_official) badges += '⭐';
+    if (friend.is_brand) badges += '🏢';
+    if (friend.is_plus) badges += '➕';
+    if (!badges) badges = '—';
+    return '<tr>' +
+      '<td class="num">' + (idx + 1) + '</td>' +
+      '<td>' + pic + '</td>' +
+      '<td class="mono">' + (friend.username ? escapeHtml(friend.username) : '—') + '</td>' +
+      '<td>' + (friend.display_name ? escapeHtml(friend.display_name) : '—') + '</td>' +
+      '<td class="mono" style="font-size:10px;">' + (friend.user_id ? escapeHtml(friend.user_id) : '—') + '</td>' +
+      '<td class="num">' + (friend.score !== null && friend.score !== undefined ? friend.score : '—') + '</td>' +
+      '<td style="font-size:10px;">' + (friend.score_updated ? escapeHtml(friend.score_updated) : '—') + '</td>' +
+      '<td style="font-size:10px;">' + (friend.added ? escapeHtml(friend.added) : '—') + '</td>' +
+      '<td class="num">' + (friend.streak !== null && friend.streak !== undefined ? friend.streak : '—') + '</td>' +
+      '<td style="font-size:10px;">' + (friend.streak_expires ? escapeHtml(friend.streak_expires) : '—') + '</td>' +
+      '<td class="mono">' + (friend.phone ? escapeHtml(friend.phone) : '—') + '</td>' +
+      '<td style="font-size:14px; letter-spacing:2px;">' + badges + '</td>' +
+      '</tr>';
+  }
+
+  function renderSnapRecordRow(rec, idx) {
+    var snapId = rec.snap_id || '';
+    var snapIdShort = escapeHtml(snapId.slice(0, 32)) + (snapId.length > 32 ? '…' : '');
+    var duration = '—';
+    if (rec.is_infinite) duration = '∞';
+    else if (rec.duration_s !== null && rec.duration_s !== undefined) duration = rec.duration_s.toFixed(1) + ' s';
+    var mediaUrl = '—';
+    if (rec.media_url) {
+      var short = rec.media_url.slice(0, 50) + (rec.media_url.length > 50 ? '…' : '');
+      mediaUrl = '<a href="' + escapeHtml(rec.media_url) + '" title="' + escapeHtml(rec.media_url) + '">' + escapeHtml(short) + '</a>';
+    }
+    return '<tr>' +
+      '<td class="num">' + (idx + 1) + '</td>' +
+      '<td class="mono" style="font-size:10px;">' + snapIdShort + '</td>' +
+      '<td style="font-size:10px;">' + (rec.timestamp ? escapeHtml(rec.timestamp) : '—') + '</td>' +
+      '<td class="num">' + (rec.snap_type !== null && rec.snap_type !== undefined ? rec.snap_type : '—') + '</td>' +
+      '<td>' + (rec.group_type ? escapeHtml(rec.group_type) : '—') + '</td>' +
+      '<td class="num">' + duration + '</td>' +
+      '<td class="num">' + (rec.story_row_id !== null && rec.story_row_id !== undefined ? rec.story_row_id : '—') + '</td>' +
+      '<td style="font-size:10px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + mediaUrl + '</td>' +
+      '</tr>';
+  }
+
+  function renderStoryRow(story, idx) {
+    var storyId = story.story_id || '';
+    var storyIdShort = escapeHtml(storyId.slice(0, 24)) + (storyId.length > 24 ? '…' : '');
+    return '<tr>' +
+      '<td class="num">' + (idx + 1) + '</td>' +
+      '<td class="mono" style="font-size:10px;">' + storyIdShort + '</td>' +
+      '<td>' + (story.display_name ? escapeHtml(story.display_name) : '—') + '</td>' +
+      '<td class="mono">' + (story.username ? escapeHtml(story.username) : '—') + '</td>' +
+      '<td class="mono" style="font-size:10px;">' + (story.user_id ? escapeHtml(story.user_id) : '—') + '</td>' +
+      '<td style="font-size:10px;">' + (story.latest ? escapeHtml(story.latest) : '—') + '</td>' +
+      '<td style="font-size:10px;">' + (story.expires ? escapeHtml(story.expires) : '—') + '</td>' +
+      '<td class="num">' + (story.viewed ? '✓' : '—') + '</td>' +
+      '<td class="num">' + (story.kind !== null && story.kind !== undefined ? story.kind : '—') + '</td>' +
+      '<td class="num">' + (story.group_story_type !== null && story.group_story_type !== undefined ? story.group_story_type : '—') + '</td>' +
+      '<td style="font-size:10px; max-width:180px;">' + (story.description ? escapeHtml(story.description) : '—') + '</td>' +
+      '</tr>';
+  }
+
+  /* ── Parse embedded datasets once ── */
+  var allSnaps = JSON.parse(document.getElementById('data-snaps').textContent);
+
   /* ── Tab switching ── */
   var mapInitialised = false;
   var chatObserver   = null;
+  var snapsPaginator = null;
+  var chatsInitialised = false, friendsInitialised = false,
+      snapRecordsInitialised = false, storiesInitialised = false;
+
+  (function initSnapsPaginator() {
+    var tbody = document.getElementById('tbody-snaps');
+    var pager = document.getElementById('pager-snaps');
+    if (tbody && pager) {
+      snapsPaginator = createPaginatedTable(tbody, pager, allSnaps, renderSnapRow, { pageSize: 50 });
+    }
+  })();
+
+  function initChatPaginators() {
+    var convEl = document.getElementById('data-conversations');
+    if (!convEl) return;
+    var conversationsData = JSON.parse(convEl.textContent);
+    var snapRefLookup = JSON.parse(document.getElementById('data-snap-refs').textContent);
+    conversationsData.forEach(function(conv, i) {
+      var tbody = document.getElementById('tbody-chat-' + (i + 1));
+      var pager = document.getElementById('pager-chat-' + (i + 1));
+      if (!tbody || !pager) return;
+      createPaginatedTable(tbody, pager, conv.messages, function(msg, idx) {
+        return renderChatRow(msg, idx, snapRefLookup);
+      }, { pageSize: 25 });
+    });
+  }
 
   function showTab(name, btn) {
     document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
@@ -733,7 +883,49 @@
     if (name === 'chats' && !chatObserver) {
       setTimeout(initChatObserver, 80);
     }
+    if (name === 'chats' && !chatsInitialised) {
+      chatsInitialised = true;
+      initChatPaginators();
+    }
+    if (name === 'friends' && !friendsInitialised) {
+      friendsInitialised = true;
+      var tbody = document.getElementById('tbody-friends');
+      var pager = document.getElementById('pager-friends');
+      if (tbody && pager) {
+        var friendsData = JSON.parse(document.getElementById('data-friends').textContent);
+        createPaginatedTable(tbody, pager, friendsData, renderFriendRow, { pageSize: 50 });
+      }
+    }
+    if (name === 'snaprecords' && !snapRecordsInitialised) {
+      snapRecordsInitialised = true;
+      var srTbody = document.getElementById('tbody-snaprecords');
+      var srPager = document.getElementById('pager-snaprecords');
+      if (srTbody && srPager) {
+        var recordsData = JSON.parse(document.getElementById('data-snaprecords').textContent);
+        createPaginatedTable(srTbody, srPager, recordsData, renderSnapRecordRow, { pageSize: 50 });
+      }
+    }
+    if (name === 'stories' && !storiesInitialised) {
+      storiesInitialised = true;
+      var stTbody = document.getElementById('tbody-stories');
+      var stPager = document.getElementById('pager-stories');
+      if (stTbody && stPager) {
+        var storiesData = JSON.parse(document.getElementById('data-stories').textContent);
+        createPaginatedTable(stTbody, stPager, storiesData, renderStoryRow, { pageSize: 50 });
+      }
+    }
   }
+
+  /* ── Print/export: temporarily render every snap row so PDF export / Ctrl+P captures ──
+     ── the full table rather than just the current page. ── */
+  window.addEventListener('beforeprint', function() {
+    var tbody = document.getElementById('tbody-snaps');
+    if (!tbody) return;
+    tbody.innerHTML = allSnaps.map(function(s, i) { return renderSnapRow(s, i); }).join('');
+  });
+  window.addEventListener('afterprint', function() {
+    if (snapsPaginator) snapsPaginator.refresh();
+  });
 
   /* ── Sidebar — highlight active conversation on scroll ── */
   function initChatObserver() {
@@ -762,28 +954,27 @@
     if (first) first.classList.add('active');
   }
 
-  /* ── Leaflet map ── */
-  var snapLocations = [
-    {% for snap in snaps %}{% if snap.latitude is not none and snap.longitude is not none %}
-    {
-      lat: {{ snap.latitude }},
-      lon: {{ snap.longitude }},
-      index: {{ loop.index }},
-      format: {{ (snap.media_format or '') | tojson }},
-      filePath: {{ (snap.file_path or '') | tojson }}
-    },
-    {% endif %}{% endfor %}
-  ];
-
+  /* ── Leaflet map — derived from the already-parsed allSnaps (no duplicate geodata embed) ── */
   function initMap() {
+    var snapLocations = allSnaps
+      .map(function(s, i) { return { s: s, index: i + 1 }; })
+      .filter(function(x) { return x.s.latitude !== null && x.s.latitude !== undefined && x.s.longitude !== null && x.s.longitude !== undefined; })
+      .map(function(x) {
+        return { lat: x.s.latitude, lon: x.s.longitude, index: x.index, format: x.s.media_format || '', filePath: x.s.file_path || '' };
+      });
+
     if (mapInitialised || snapLocations.length === 0) return;
     mapInitialised = true;
 
     var map = L.map('map');
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      maxZoom: 19,
-      subdomains: 'abcd'
+    // Esri's free World basemap tiles — unlike OSM's tile servers, these don't require a
+    // Referer header, which a report opened via file:// typically doesn't send.
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+      maxZoom: 16
+    }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 16
     }).addTo(map);
 
     var bounds = [];

@@ -14,6 +14,7 @@ from parsers.android.main_db import (
     parse_friends, parse_snap_records, parse_stories,
     find_core_db_android, parse_user_profile,
 )
+from parsers.date_filter import snap_in_date_range
 
 
 def process_android(
@@ -22,6 +23,8 @@ def process_android(
     output_path: str,
     download_files: bool,
     examiner: str = "",
+    date_from: str = None,
+    date_to: str = None,
     log_callback=None,
 ) -> str:
 
@@ -61,6 +64,8 @@ def process_android(
         memories_path=memories_dest,
         output_path=case_folder,
         download_files=download_files,
+        date_from=date_from,
+        date_to=date_to,
         log_callback=_log,
     )
 
@@ -141,7 +146,7 @@ def process_android(
     return report_path
 
 
-def parse_main(memories_path, output_path, download_files, log_callback=None) -> list:
+def parse_main(memories_path, output_path, download_files, date_from=None, date_to=None, log_callback=None) -> list:
 
     def _log(msg, lvl="INFO"):
         if log_callback:
@@ -180,6 +185,8 @@ JOIN memories_media
     downloadable_rows = [r for r in rows if r[3]]
     total = len(downloadable_rows)
     download_index = 0
+    skipped_out_of_range = 0
+    skipped_unknown_date = 0
     snaps = []
 
     for row in rows:
@@ -227,7 +234,14 @@ JOIN memories_media
             "file_path": None,
         }
 
-        if download_files:
+        date_ok = snap_in_date_range(capture_time, date_from, date_to)
+        if download_files and not date_ok:
+            if not capture_time:
+                skipped_unknown_date += 1
+            else:
+                skipped_out_of_range += 1
+
+        if download_files and date_ok:
             download_index += 1
             try:
                 _log(f"Downloading snap {download_index}/{total}: {snap_id}")
@@ -258,5 +272,13 @@ JOIN memories_media
                 _log(f"Download/decrypt error for snap {snap_id}: {e}", "ERROR")
 
         snaps.append(snap)
+
+    if download_files and (date_from or date_to):
+        _log(
+            f"Date filter ({date_from or '…'} to {date_to or '…'}): "
+            f"{skipped_out_of_range} snap(s) skipped (outside range), "
+            f"{skipped_unknown_date} snap(s) skipped (capture time unknown)",
+            "INFO",
+        )
 
     return snaps

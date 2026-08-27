@@ -6,13 +6,14 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QLineEdit,
-    QCheckBox, QFileDialog, QLabel, QGridLayout, QTextEdit, QHBoxLayout, QVBoxLayout
+    QCheckBox, QFileDialog, QLabel, QGridLayout, QTextEdit, QHBoxLayout, QVBoxLayout,
+    QDateEdit
 )
 from PySide6.QtGui import QPixmap
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, QTimer, QDate
 from qt_material import apply_stylesheet
 
-from parsers.ios.keychain import process_keychain
+from parsers.ios.keychain import process_keychain, _AES256_KEY_SIZE
 from parsers.android.android import process_android
 from parsers.ios.ios import process_ios
 
@@ -27,18 +28,24 @@ class ProcessWorker(QObject):
     error      = Signal(str)        # error message
 
     def __init__(self, platform, case_name, examiner, extract_path,
-                 output_path, keychain_path, download_snaps):
+                 output_path, keychain_path, download_snaps,
+                 date_from=None, date_to=None):
         super().__init__()
-        self.platform      = platform
-        self.case_name     = case_name
-        self.examiner      = examiner
-        self.extract_path  = extract_path
-        self.output_path   = output_path
-        self.keychain_path = keychain_path
+        self.platform       = platform
+        self.case_name      = case_name
+        self.examiner       = examiner
+        self.extract_path   = extract_path
+        self.output_path    = output_path
+        self.keychain_path  = keychain_path
         self.download_snaps = download_snaps
+        self.date_from      = date_from
+        self.date_to        = date_to
+        self.log_entries: list[str] = []
 
     def run(self):
         def log(msg, lvl="INFO"):
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.log_entries.append(f"[{ts}] {lvl}: {msg}")
             self.log_signal.emit(str(msg), lvl)
 
         try:
@@ -52,6 +59,8 @@ class ProcessWorker(QObject):
                     cipherkey=result,
                     output_path=self.output_path,
                     download_files=self.download_snaps,
+                    date_from=self.date_from,
+                    date_to=self.date_to,
                     log_callback=log,
                 )
             elif self.platform == "ANDROID":
@@ -61,10 +70,19 @@ class ProcessWorker(QObject):
                     input_path=self.extract_path,
                     output_path=self.output_path,
                     download_files=self.download_snaps,
+                    date_from=self.date_from,
+                    date_to=self.date_to,
                     log_callback=log,
                 )
             else:
                 report_path = ""
+
+            case_folder = os.path.join(self.output_path, self.case_name)
+            if os.path.isdir(case_folder):
+                log_path = os.path.join(case_folder, f"{self.case_name}.log")
+                with open(log_path, "w", encoding="utf-8") as lf:
+                    lf.write("\n".join(self.log_entries) + "\n")
+                self.log_signal.emit(f"Log saved: {log_path}", "OK")
 
             self.finished.emit(report_path or "")
 
@@ -117,7 +135,7 @@ class SnapchatParserGUI(QWidget):
         case_label     = QLabel("Case Name")
         examiner_label = QLabel("Examiner Name")
         extraction_label = QLabel("Snapchat Folder")
-        keychain_label = QLabel("Keychain File (iOS)")
+        keychain_label = QLabel("Keychain / Key File (iOS)")
         output_label   = QLabel("Output Folder")
 
         # Inputs
@@ -133,7 +151,7 @@ class SnapchatParserGUI(QWidget):
         )
 
         self.keychain_path = QLineEdit()
-        self.keychain_path.setPlaceholderText("Keychain file (iOS)")
+        self.keychain_path.setPlaceholderText("Keychain plist or egocipher.key.avoidkeyderivation (iOS)")
 
         self.output_path = QLineEdit()
         self.output_path.setPlaceholderText("Select output directory")
@@ -149,6 +167,23 @@ class SnapchatParserGUI(QWidget):
 
         # Checkbox + Process button
         self.download_snaps = QCheckBox("Download Snaps")
+
+        # Date range filter (limits what gets downloaded, not what appears in the report)
+        self.date_filter_checkbox = QCheckBox("Filter downloads by capture date")
+        self.date_filter_checkbox.setEnabled(False)
+        self.date_filter_checkbox.toggled.connect(self._on_date_filter_toggled)
+
+        self.date_from = QDateEdit()
+        self.date_from.setCalendarPopup(True)
+        self.date_from.setDisplayFormat("yyyy-MM-dd")
+        self.date_from.setDate(QDate.currentDate())
+        self.date_from.setEnabled(False)
+
+        self.date_to = QDateEdit()
+        self.date_to.setCalendarPopup(True)
+        self.date_to.setDisplayFormat("yyyy-MM-dd")
+        self.date_to.setDate(QDate.currentDate())
+        self.date_to.setEnabled(False)
 
         self.process_btn = QPushButton("Process")
         self.process_btn.setMinimumHeight(40)
@@ -185,11 +220,21 @@ class SnapchatParserGUI(QWidget):
         # Row 5: Download Snaps checkbox
         grid_layout.addWidget(self.download_snaps, 5, 1)
 
-        # Row 6: Process button
-        grid_layout.addWidget(self.process_btn, 6, 1)
+        # Row 6: Date range filter (limits downloads only, disabled until a platform is detected)
+        date_row = QHBoxLayout()
+        date_row.addWidget(self.date_filter_checkbox)
+        date_row.addWidget(QLabel("From"))
+        date_row.addWidget(self.date_from)
+        date_row.addWidget(QLabel("To"))
+        date_row.addWidget(self.date_to)
+        date_row.addStretch()
+        grid_layout.addLayout(date_row, 6, 1, 1, 2)
 
-        # Row 7: Log box
-        grid_layout.addWidget(self.log_box, 7, 0, 1, 3)
+        # Row 7: Process button
+        grid_layout.addWidget(self.process_btn, 7, 1)
+
+        # Row 8: Log box
+        grid_layout.addWidget(self.log_box, 8, 0, 1, 3)
 
         main_layout.addLayout(grid_layout)
         self.setLayout(main_layout)
@@ -266,12 +311,20 @@ class SnapchatParserGUI(QWidget):
                 self.keychain_path.clear()
                 self.keychain_path.setEnabled(False)
                 self.keychain_btn.setEnabled(False)
+                self.date_filter_checkbox.setEnabled(True)
             elif platform == "IOS":
                 self.log("Detected iOS Snapchat extraction", "INFO")
                 self.keychain_path.setEnabled(True)
                 self.keychain_btn.setEnabled(True)
+                self.date_filter_checkbox.setEnabled(True)
             else:
                 self.log("Unknown Snapchat folder type", "ERROR")
+                self.date_filter_checkbox.setChecked(False)
+                self.date_filter_checkbox.setEnabled(False)
+
+    def _on_date_filter_toggled(self, checked):
+        self.date_from.setEnabled(checked)
+        self.date_to.setEnabled(checked)
 
     def select_output(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
@@ -280,10 +333,13 @@ class SnapchatParserGUI(QWidget):
             self.log(f"Selected output folder: {folder}")
 
     def select_keychain(self):
-        file, _ = QFileDialog.getOpenFileName(self, "Select Keychain File")
+        file, _ = QFileDialog.getOpenFileName(
+            self, "Select Keychain or Key File",
+            filter="Key Files (*.plist *.cipherkey);;All Files (*)",
+        )
         if file:
             self.keychain_path.setText(file)
-            self.log(f"Selected keychain file: {file}")
+            self.log(f"Selected keychain/key file: {file}")
 
     # ── Platform detection ──
     def detect_platform(self, folder_path):
@@ -312,12 +368,35 @@ class SnapchatParserGUI(QWidget):
             return
 
         if platform == "IOS":
-            keychain_file = self.keychain_path.text()
+            keychain_file = self.keychain_path.text().strip()
             if not keychain_file:
-                self.log("No keychain file selected", "ERROR")
+                self.log("No keychain/key file selected", "ERROR")
                 return
+            # Allow a raw 64-char hex key to be typed/pasted directly
+            if not re.match(r'^[0-9a-fA-F]{64}$', keychain_file):
+                if not os.path.isfile(keychain_file):
+                    self.log("Keychain/key file not found", "ERROR")
+                    return
+                file_size = os.path.getsize(keychain_file)
+                if file_size != _AES256_KEY_SIZE and file_size < 64:
+                    self.log(
+                        f"Invalid file ({file_size} B) — select a keychain plist, "
+                        f"a 32-byte ego.cipherkey, or paste the 64-char hex key directly",
+                        "ERROR",
+                    )
+                    return
         else:
             keychain_file = ""
+
+        date_from = None
+        date_to = None
+        if self.date_filter_checkbox.isChecked():
+            if self.date_from.date() > self.date_to.date():
+                self.log("Date range 'From' is after 'To'", "ERROR")
+                return
+            date_from = self.date_from.date().toString("yyyy-MM-dd")
+            date_to = self.date_to.date().toString("yyyy-MM-dd")
+            self.log(f"Download date filter: {date_from} to {date_to}")
 
         self.log(f"Processing case: {case_name}")
         self.log(f"Examiner: {examiner}")
@@ -332,6 +411,8 @@ class SnapchatParserGUI(QWidget):
             output_path=base_output,
             keychain_path=keychain_file,
             download_snaps=self.download_snaps.isChecked(),
+            date_from=date_from,
+            date_to=date_to,
         )
         self.thread = QThread()
         self.worker.moveToThread(self.thread)
@@ -352,6 +433,7 @@ class SnapchatParserGUI(QWidget):
         if report_path:
             self.log(f"Report saved: {report_path}", "OK")
             webbrowser.open(f"file:///{report_path.replace(os.sep, '/')}")
+            QTimer.singleShot(1500, QApplication.instance().quit)
         else:
             self.log("No report generated — check errors above", "ERROR")
 
